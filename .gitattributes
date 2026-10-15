@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+*.go diff=golang
+go.sum linguist-generated=true

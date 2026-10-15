@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  Repo: github.com/sikhlana/fx-modules, a public, personal library of
+  Repo: github.com/sikhlana/pkg, a public, personal library of
   reusable Go modules built around Uber fx. Each subdirectory with its
   own go.mod is an independently versioned module; there is no root
   go.mod. A committed root go.work ties the modules together for local

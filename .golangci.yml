@@ -3,7 +3,7 @@
 
 # Based on the golden config for golangci-lint v2:
 # https://gist.github.com/maratori/47a4d00457a92aa426dbd48a18776322
-# Adapted for fx-modules: forbidigo bans and godoc enforcement from openspec/config.yaml.
+# Adapted for github.com/sikhlana/pkg: forbidigo bans and godoc enforcement from openspec/config.yaml.
 
 version: "2"
 
@@ -26,7 +26,7 @@ formatters:
       # with the given prefixes are grouped after 3rd-party packages.
       # Default: []
       local-prefixes:
-        - github.com/sikhlana/fx-modules
+        - github.com/sikhlana/pkg
 
     golines:
       # Target maximum line length.

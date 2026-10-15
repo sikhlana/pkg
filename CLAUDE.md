@@ -1,4 +1,4 @@
-# fx-modules
+# pkg
 
 A personal library of reusable Go modules, wired through [Uber fx](https://uber-go.github.io/fx/). Each subdirectory with a `go.mod` is its own module, versioned and tagged on its own (`<module>/v<version>`). There's no root `go.mod`; the committed `go.work` ties the modules together locally.
 

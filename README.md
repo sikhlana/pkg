@@ -1,10 +1,10 @@
-# fx-modules
+# pkg
 
 Reusable Go modules I reach for day to day, built around [Uber fx](https://uber-go.github.io/fx/). Each subdirectory is an independently versioned Go module, so importing one never pulls in the dependencies of another.
 
 ## Modules
 
-Nothing has shipped yet. Each module gets a row here, in alphabetical order, as it lands. Import paths follow `github.com/sikhlana/fx-modules/<dir>`.
+Nothing has shipped yet. Each module gets a row here, in alphabetical order, as it lands. Import paths follow `github.com/sikhlana/pkg/<dir>`.
 
 | Module | Description |
 |--------|-------------|
@@ -14,7 +14,7 @@ Nothing has shipped yet. Each module gets a row here, in alphabetical order, as 
 Import only what you need:
 
 ```bash
-go get github.com/sikhlana/fx-modules/<module>@latest
+go get github.com/sikhlana/pkg/<module>@latest
 ```
 
 ## How a module is shaped
@@ -54,7 +54,7 @@ Tags are never created by hand.
 
 ## Adding a module
 
-1. Create the directory with a `go.mod` for `github.com/sikhlana/fx-modules/<dir>`, a `VERSION` containing `0.1.0`, and a `README.md`.
+1. Create the directory with a `go.mod` for `github.com/sikhlana/pkg/<dir>`, a `VERSION` containing `0.1.0`, and a `README.md`.
 2. Register it in the root `go.work`.
 3. Add a row to the [Modules](#modules) table.
 4. Follow the layout and conventions in [openspec/config.yaml](./openspec/config.yaml).

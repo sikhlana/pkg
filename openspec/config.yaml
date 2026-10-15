@@ -1,0 +1,255 @@
+schema: spec-driven
+
+context: |
+  Repo: github.com/sikhlana/fx-modules, a public, personal library of
+  reusable Go modules built around Uber fx. Each subdirectory with its
+  own go.mod is an independently versioned module; there is no root
+  go.mod. A committed root go.work ties the modules together for local
+  development. This block is the constitution: CLAUDE.md and README.md
+  point here rather than restating it.
+
+  Principles:
+  - fx-first, not fx-only. Every stateful module integrates with fx,
+    and every constructor also works without it: Params is a plain
+    struct a caller can fill in by hand.
+  - The Module is the API. Consumers compose an app by listing module
+    identifiers, not by wiring constructors, so internal wiring can
+    change without breaking them.
+  - Operator config and developer wiring are different inputs and
+    reach a constructor by different routes (see below).
+  - Providing a loop is not running it. A module that owns a
+    long-running loop provides it; the app opts in to running it.
+  - Small modules, small dependency trees. Importing one module never
+    drags in another's dependencies.
+  - Solved, fiddly problems use a maintained library or the vendor's
+    SDK, not hand-rolled code.
+
+  Versioning and releases:
+  - Modules are tagged <module>/v<version>; nested modules keep their
+    path (http/server/v0.2.0). CI creates the tag and GitHub release on
+    merge to main. Never tag by hand.
+  - Each module has a VERSION file holding its semver. Every PR that
+    changes a module's files bumps that module's VERSION, including
+    test-only, README, godoc and example edits, and compile fixes
+    forced by a sibling's API change.
+  - Patch: fixes, refactors, dependency updates, docs and tests.
+    Minor: new exports. Major: breaking changes once a module is 1.0.
+    Pre-1.0, breaking changes take a minor bump; 1.0 is a deliberate
+    stability call, not a way to earn majors.
+  - A major past v1 moves the module path to <dir>/vN (semantic import
+    versioning), a new import path for every consumer. Treat it as a
+    last resort; prefer additive change.
+  - A module that has never been tagged stays at 0.1.0; edits before
+    its first tag don't bump.
+  - No replace directives in go.mod. go.work is committed; go.work.sum
+    is not. Before merge, every go.mod requires published versions of
+    its siblings, so interdependent modules release in dependency
+    order, one PR per tier.
+  - Every go.mod and go.work declares the Go version in .go-version at
+    the repo root.
+  - The repo is MIT-licensed through a single root file named exactly
+    LICENSE. go copies that file, by that name only, into every nested
+    module's zip, and pkg.go.dev needs it there. Modules don't carry
+    their own copy.
+
+  fx integration:
+  - A package that owns state, runs work, or wires services exports an
+    fx.Module variable named exactly Module. Utility packages, pure
+    function primitives and <module>test/ packages don't.
+  - fx.Module names are plain for top-level modules ("logger") and
+    colon-separated, mirroring the path, for nested ones
+    ("http:server").
+  - Every constructor registered with fx.Provide takes a single Params
+    struct embedding fx.In, even for one dependency. Name it Params, or
+    by purpose (PublisherParams) when a module has several. The
+    fx.Lifecycle field is named Lifecycle. Optional dependencies use
+    `optional:"true"`.
+  - Name tags are name:"<module>:<purpose>:<name>", built by an
+    exported helper (ConfigNameTag(name)) so callers never format them.
+    Group tags are group:"<module>:<purpose>", exposed as an exported
+    constant. A new group ships the constant, a typed ProvideX helper
+    that tags the caller's constructor, and a collector that takes the
+    group via fx.In.
+
+  Choosing how to expose a type (one shape per type):
+  1. Singleton: fx.Provide(New) when one instance per app suffices.
+  2. Provider: a function type that takes a Config and returns a
+     client, for the same kind of client built per config (several
+     accounts, hosts, queues). Suffix Provider, never Factory. Not for
+     middleware or decorator shapes (func(http.Handler) http.Handler);
+     those are named for what they wrap.
+  3. Mode-dispatching constructor: Config.Mode picks one of several
+     implementations of an interface. The implementations stay
+     exported and directly constructible.
+  4. Plain function: stateless helpers, no fx involvement.
+
+  Config vs developer-time wiring:
+  - If an operator could change a value by editing config and
+    restarting, it's a Config field; otherwise it's developer wiring.
+    Borderline knobs start as wiring: promoting one to Config later is
+    cheap, demoting is not.
+  - Config fields carry mapstructure snake_case tags. config.go holds
+    only operator config, never structural values like component name
+    or version.
+  - Developer wiring (loggers, HTTP clients, callbacks, component
+    names) is a typed fx value with a pair of helpers: AsX annotates a
+    value or a constructor, WithX(v) wraps fx.Supply(AsX(v)). Ship both
+    halves.
+  - Where zero means "unset", pair an exported Default* constant with
+    an unexported resolver method on Config. Don't where zero is a
+    legitimate value.
+  - Validate tags check value shape (omitempty, url, oneof). Never use
+    the required tag: the tag pass also walks dormant mode-specific
+    structs. Required fields and cross-field invariants go in a
+    Validate() error method returning exported sentinels. Config is
+    validated once where it's loaded; Provider closures validate the
+    Config they're handed; fx-wired constructors trust their input.
+
+  Run loops and cross-module integration:
+  - A long-running loop (server, receiver, poller) is split: Module
+    provides the implementation, and a separate ProvideRunner in
+    runner.go, with a DefaultRunnerName constant, opts it in to
+    running. Shared infrastructure lists the Module; only the commands
+    that need the loop list ProvideRunner.
+  - A module doesn't import a sibling just to integrate with it. It
+    exposes a value (a check func, a handler) and the consuming app
+    wires the integration.
+  - An integration that pulls a heavy dependency lives in a subpackage
+    (<module>/<integration>) so consumers that don't import it don't
+    build it.
+
+  Code standards:
+  - Constructors don't repeat the package name: logger.New, not
+    logger.NewLogger. Use New<Type> only when a package has several
+    principal types.
+  - Receivers: values for small immutable structs (configs, tokens);
+    pointers when a method mutates, the struct is large, or it holds a
+    mutex or channel. Never mix receivers on one type.
+  - Errors: lowercase gerund, no trailing period, wrapped with %w
+    ("creating client: %w"). Documented failure modes are exported
+    sentinels checked with errors.Is. Use errors.AsType[T], not
+    errors.As.
+  - Modules log through an injected *slog.Logger, never through the
+    slog or log package-level functions.
+  - Godoc every exported symbol, minimally: start with the name, say
+    what it does and any non-obvious behaviour (concurrency, side
+    effects, error semantics). Don't restate the signature.
+  - Comments don't narrate changes ("added X", "fix for Y", "used by
+    Z"); that belongs in the PR. Inline comments explain a non-obvious
+    why, nothing else.
+  - No internal/ directories. These are libraries; everything is
+    exported by design.
+  - Interface-satisfaction checks (var _ Iface = T{}) go in _test.go
+    files.
+  - Don't hand-fix formatting; golangci-lint --fix owns it.
+
+  Testing:
+  - Every failure goes through testify: require.* to stop, assert.* to
+    continue. Never t.Fatal, t.Fatalf, t.Error, t.Errorf, t.Fail or
+    t.FailNow. Orchestration helpers (t.Helper, t.Run, t.Cleanup,
+    t.Context, t.TempDir, t.Setenv) are fine.
+  - Use t.Context(), not context.Background(), and t.Helper() in
+    helpers. Servers bind 127.0.0.1:0, never a fixed port.
+  - fx tests run the real Module under fxtest.New, with fx.Supply for
+    its dependencies; not hand-rewired fx.Provide or fx.Annotate.
+    Direct construction fills Params by hand, with
+    fxtest.NewLifecycle(t) for Lifecycle.
+  - Mocks are gomock, generated by mockgen from a //go:generate
+    directive beside the interface it mocks, and committed. Run
+    go generate ./... after changing a mocked interface. mockgen comes
+    from PATH, never go run …@latest.
+  - Doubles that consumers need (spies, in-memory fakes) live in
+    <module>test/.
+  - Fixture helpers that marshal panic on error, or take *testing.T and
+    require.NoError; never discard the error.
+  - Tests that need external services or run long skip under -short.
+
+  Tooling:
+  - Toolchains (go, golangci-lint, modernize, mockgen) run directly;
+    this repo doesn't wrap them in Docker.
+  - Prefer a lint ban to a written rule. When a rule here reads "use X,
+    not Y" and Y is a symbol, .golangci.yml bans Y with forbidigo and a
+    message naming X. From this block: the t.Fatal family (testify),
+    errors.As (errors.AsType), context.Background in tests
+    (t.Context), and package-level slog and log calls (an injected
+    *slog.Logger).
+  - Verification, in order. On each touched module: modernize -fix,
+    then golangci-lint run --fix (and again without --fix if it changed
+    files; the no-fix run is the source of truth), then the full
+    go test ./... . Then go test -short ./... across every module.
+
+  Module layout:
+    mymodule/
+    ├── go.mod, VERSION, README.md    required
+    ├── config.go                     when the module has a Config
+    ├── mymodule.go                   implementation
+    ├── module.go                     Module, AsX/WithX helpers
+    ├── runner.go                     when it owns a long-running loop
+    ├── *_test.go
+    └── mymoduletest/                 optional consumer-facing doubles
+
+  Documentation:
+  - A module README has, in order: title; a one- or two-sentence
+    overview; ## Configuration (Field, Type, Description);
+    ## Exported Members (Name, Description); ## Usage with Standalone
+    and With fx subsections; ## Test Helpers when <module>test/ exists.
+  - Exported Members lists every exported symbol the module commits
+    to: types, functions, constants, methods (qualified, as in
+    Client.Do) and struct fields that are part of the API. Config
+    fields stay in Configuration.
+  - A change that adds, removes or renames an export updates the README
+    in the same PR. A new module adds a row to the root README Modules
+    table (alphabetical) and registers in go.work.
+  - Markdown tables, repo-wide: no backticks in cells; header,
+    separator and body rows have the same column count.
+  - READMEs say how to use a module. docs/<topic>.md says why a
+    cross-module pattern or non-obvious trade-off exists.
+
+  Specs:
+  - One spec per module: openspec/specs/<module>/spec.md. Folder names
+    are kebab-case; nested paths flatten with a dash (http/server ->
+    http-server).
+  - Specs hold the behavioural guarantees a module makes to consumers.
+    Project-wide patterns live in this block, not in per-module specs.
+  - A <module>test/ package is specced only when consumers depend on
+    its behaviour.
+
+rules:
+  proposal:
+    - Under Impact, name every module the change touches and say, for
+      each, whether its exported API changes or only its internals.
+    - For a new module, state its exposure shape(s) and whether it has
+      a Module, a Config and a runner.
+  design:
+    - Name any new dependency and why it beats hand-rolled code. Put a
+      heavy optional dependency behind a subpackage.
+    - Flag durable rationale for rollup into docs/<topic>.md at
+      archive; design.md is a discussion surface, not its final home.
+  tasks:
+    - One VERSION bump task per touched module, stating patch, minor
+      or major. Skip modules that have never been tagged.
+    - A README task for each module whose exports or Config change.
+      A new module also gets tasks for its root README row and its
+      go.work registration.
+    - A go generate ./... task for each module whose mocked interfaces
+      change, before verification.
+    - A verification task per touched module running the constitution's
+      chain (modernize -fix, golangci-lint run --fix, a no-fix lint
+      re-run if files changed, then the full go test ./...).
+    - Then a task running go test -short ./... across every module. If
+      it fails, fix and repeat both verification steps until it
+      passes.
+  specs:
+    - Use SHALL/MUST/MAY (RFC 2119) for normative requirements.
+    - Each requirement has at least one scenario, headed with exactly
+      four hashtags (#### Scenario:).
+    - Keep requirements behavioural, from the consumer's side. Don't
+      restate the exported API; the README and go doc cover it.
+
+operations:
+  archive:
+    guidance:
+      - Before archiving, record in design.md what actually happened,
+        covering deviations from the design, fixes made in review and
+        follow-ups left open.
+      - Roll durable rationale from design.md into docs/<topic>.md.

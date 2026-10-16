@@ -32,14 +32,17 @@ context: |
     changes a module's files bumps that module's VERSION, including
     test-only, README, godoc and example edits, and compile fixes
     forced by a sibling's API change.
-  - Patch: fixes, refactors, dependency updates, docs and tests.
-    Minor: new exports. Major: breaking changes once a module is 1.0.
-    Pre-1.0, breaking changes take a minor bump; 1.0 is a deliberate
-    stability call, not a way to earn majors.
+  - Patch: fixes, refactors, patch-level dependency updates, docs and
+    tests. Minor: new exports, and a go.mod that raises a requirement
+    to a higher minor or major, or raises the go directive, which
+    gorelease's floor demands even when the API is unchanged. Major:
+    breaking changes once a module is 1.0. Pre-1.0, breaking changes
+    take a minor bump; 1.0 is a deliberate stability call, not a way
+    to earn majors.
   - CI enforces a floor: VERSION must be at least the version gorelease
-    suggests from the exported-API diff against the module's last
-    release. The author can go higher (a behaviour change behind an
-    unchanged API), never lower.
+    suggests from the exported-API diff and the go.mod changes against
+    the module's last release. The author can go higher (a behaviour
+    change behind an unchanged API), never lower.
   - A module's path is the repo path followed by its directory. A major
     past v1 therefore lives in a new <dir>/vN directory with module path
     <repo>/<dir>/vN (semantic import versioning), a new import path for

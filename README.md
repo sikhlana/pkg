@@ -9,6 +9,7 @@ Each module gets a row here, in alphabetical order, as it lands. Import paths fo
 | Module | Description |
 |--------|-------------|
 | [cli](./cli) | Cobra scaffolding for a program's main: signal handling, exit codes, root and version commands, build info |
+| [config/configvalidator](./config/configvalidator) | Validates a config struct with its validate tags and Validate methods, reporting every violation by config key |
 
 ## Installation
 
@@ -38,7 +39,7 @@ Each module's README documents its Configuration, its Exported Members, and both
 
 ## Versioning and releases
 
-This is a multi-module repository. Each module has its own `go.mod`, `README.md` and `VERSION` file, and is tagged on its own as `<module>/v<version>` (for example `logger/v0.1.0`, or `http/server/v0.2.0` for a nested module).
+This is a multi-module repository. Each module has its own `go.mod`, `README.md` and `VERSION` file, and is tagged on its own as `<module>/v<version>` (for example `logger/v0.1.0`, or `http/httpserver/v0.2.0` for a nested module).
 
 Versions follow [semver](https://semver.org/):
 

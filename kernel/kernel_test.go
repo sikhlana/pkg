@@ -6,8 +6,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -17,7 +15,6 @@ import (
 	"go.uber.org/fx"
 
 	"github.com/sikhlana/pkg/cli"
-	"github.com/sikhlana/pkg/config/configloader"
 	"github.com/sikhlana/pkg/kernel"
 	"github.com/sikhlana/pkg/kernelrun"
 	"github.com/sikhlana/pkg/log"
@@ -133,32 +130,173 @@ func TestDebugLevelAndFxEvents(t *testing.T) {
 	assert.Contains(t, messages, "OnStart hook executed")
 }
 
-func TestConfigReachesTheLoader(t *testing.T) {
-	type config struct {
-		Greeting string `mapstructure:"greeting"`
+func TestConfigGivenThePath(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "with --config", args: []string{"run", "--config", "./app.yaml"}, want: "./app.yaml"},
+		{name: "without --config", args: []string{"run"}},
 	}
 
-	path := filepath.Join(t.TempDir(), "app.yaml")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				called bool
+				got    string
+			)
 
-	require.NoError(t, os.WriteFile(path, []byte("greeting: hello\n"), 0o600))
+			config := func(path string) fx.Option {
+				called, got = true, path
 
-	var got string
+				return fx.Options()
+			}
+
+			root, _ := program(kernel.Options{Config: config}, kernelrun.WithRunner("app", returnNil))
+
+			code, _ := execute(t, root, tt.args...)
+
+			require.Equal(t, 0, code)
+			assert.True(t, called, "Config wasn't called")
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestConfigIsPartOfTheApp(t *testing.T) {
+	type config string
+
+	var got config
 
 	root, _ := program(
-		kernel.Options{Shared: configloader.Provide(configloader.Options[config]{Name: "kerneltest"})},
+		kernel.Options{Config: func(path string) fx.Option { return fx.Supply(config(path)) }},
 		kernelrun.ProvideRunner("app", func(c config) kernelrun.Func {
 			return func(context.Context) error {
-				got = c.Greeting
+				got = c
 
 				return nil
 			}
 		}),
 	)
 
-	code, _ := execute(t, root, "run", "--config", path)
+	code, _ := execute(t, root, "run", "--config", "./app.yaml")
 
 	require.Equal(t, 0, code)
-	assert.Equal(t, "hello", got)
+	assert.Equal(t, config("./app.yaml"), got)
+}
+
+func TestConfigHelpShowsAPlaceholder(t *testing.T) {
+	root, _ := program(kernel.Options{Config: func(string) fx.Option { return fx.Options() }})
+
+	var help bytes.Buffer
+
+	root.SetOut(&help)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"run", "--help"})
+
+	require.Equal(t, 0, cli.Execute(t.Context(), root))
+	assert.Regexp(t, `--config file\s`, help.String())
+}
+
+func TestWithoutConfigHelpHidesTheFlag(t *testing.T) {
+	root, _ := program(kernel.Options{})
+
+	var help bytes.Buffer
+
+	root.SetOut(&help)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"run", "--help"})
+
+	require.Equal(t, 0, cli.Execute(t.Context(), root))
+	assert.NotContains(t, help.String(), "--config")
+}
+
+func TestWithoutConfigTheFlagIsRejected(t *testing.T) {
+	var ran bool
+
+	root, _ := program(kernel.Options{}, flagRunner(&ran))
+
+	code, stderr := execute(t, root, "run", "--config", "./app.yaml")
+
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr, "--config")
+	assert.False(t, ran, "the app ran")
+}
+
+func TestConfigReturningNil(t *testing.T) {
+	var ran bool
+
+	root, _ := program(kernel.Options{Config: func(string) fx.Option { return nil }}, flagRunner(&ran))
+
+	code, stderr := execute(t, root, "run")
+
+	require.Equal(t, 0, code, stderr)
+	assert.True(t, ran, "the app didn't run")
+}
+
+func TestConfigReusesTheRootsFlag(t *testing.T) {
+	if cli.NewRootCommand("myapp", "").PersistentFlags().Lookup(kernel.ConfigFlag) == nil {
+		t.Skip("cli's root no longer defines --config, so there's no flag to reuse")
+	}
+
+	var got string
+
+	app := kernel.New(kernel.Options{Config: func(path string) fx.Option {
+		got = path
+
+		return fx.Options(log.WithDestination(io.Discard))
+	}})
+
+	root := app.RootCommand("myapp", "A test program")
+	root.AddCommand(app.Command("run", "Runs the app", kernelrun.WithRunner("app", returnNil)))
+
+	require.NotNil(t, root.PersistentFlags().Lookup(kernel.ConfigFlag))
+
+	code, _ := execute(t, root, "run", "--config", "./app.yaml")
+
+	require.Equal(t, 0, code)
+	assert.Equal(t, "./app.yaml", got)
+}
+
+func TestWithoutConfigNoConfigFlagLookedFor(t *testing.T) {
+	var ran bool
+
+	app := kernel.New(kernel.Options{Shared: log.WithDestination(io.Discard)})
+
+	root := kernelFlagsRoot()
+	root.AddCommand(app.Command("run", "Runs the app", flagRunner(&ran)))
+
+	code, stderr := execute(t, root, "run")
+
+	require.Equal(t, 0, code, stderr)
+	assert.True(t, ran, "the app didn't run")
+}
+
+func TestConfigFlagMissing(t *testing.T) {
+	var (
+		ran bool
+		err error
+	)
+
+	app := kernel.New(kernel.Options{Config: func(string) fx.Option { return fx.Options() }})
+
+	root := kernelFlagsRoot()
+	root.AddCommand(&cobra.Command{
+		Use: "run",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			err = app.Run(cmd, flagRunner(&ran))
+
+			return err
+		},
+	})
+
+	code, _ := execute(t, root, "run")
+
+	assert.Equal(t, 1, code)
+	require.ErrorIs(t, err, kernel.ErrMissingFlag)
+	require.EqualError(t, err, "missing kernel flag: config")
+	assert.False(t, ran, "the app ran")
 }
 
 func TestSharedAndOwnOptions(t *testing.T) {

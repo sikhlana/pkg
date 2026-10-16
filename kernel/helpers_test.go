@@ -95,6 +95,19 @@ func program(o kernel.Options, opts ...fx.Option) (*cobra.Command, *lockedBuffer
 	return root, out
 }
 
+// kernelFlagsRoot returns a root that defines the kernel's logging flags by hand, and no --config.
+func kernelFlagsRoot() *cobra.Command {
+	root := &cobra.Command{Use: "myapp", SilenceUsage: true}
+
+	flags := root.PersistentFlags()
+
+	flags.Bool(kernel.DebugFlag, false, "")
+	flags.Bool(kernel.QuietFlag, false, "")
+	flags.TextVar(new(log.Format), kernel.FormatFlag, log.FormatJSON, "")
+
+	return root
+}
+
 // execute runs root through cli.Execute with args and returns the exit code and what cobra printed as errors.
 func execute(t *testing.T, root *cobra.Command, args ...string) (int, string) {
 	t.Helper()

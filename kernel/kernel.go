@@ -12,7 +12,6 @@ import (
 	"go.uber.org/fx"
 
 	"github.com/sikhlana/pkg/cli"
-	"github.com/sikhlana/pkg/config/configloader"
 	"github.com/sikhlana/pkg/kernelrun"
 	"github.com/sikhlana/pkg/log"
 	"github.com/sikhlana/pkg/log/tint"
@@ -27,14 +26,29 @@ const (
 
 	// FormatFlag is the name of the persistent flag RootCommand adds to pick the log format, --format.
 	FormatFlag = "format"
+
+	// ConfigFlag is the name of the persistent flag RootCommand adds, when Options.Config is set, to pass the config
+	// file, --config. It's the name cli's root gave its own flag before cli v0.3.0, which RootCommand adjusts instead.
+	ConfigFlag = "config"
 )
+
+// configUsage is --config's help text. The backquoted word is the value's placeholder.
+const configUsage = "path to the config `file`"
 
 // ErrMissingFlag is returned by App.Run for a command whose root wasn't built by App.RootCommand. The error names the
 // first flag missing.
 var ErrMissingFlag = errors.New("missing kernel flag")
 
+// errNoConfig is returned by App.Run when the operator passes cli's --config, which cli's root still defines before
+// cli v0.3.0, to a program that loads no config.
+var errNoConfig = errors.New("--config: this program loads no config")
+
 // Options holds a program's developer settings, shared by every command it builds.
 type Options struct {
+	// Config returns the program's config loading as an fx option, given --config's path, which is empty when the
+	// operator passed none. Nil means the program loads no config: there's no --config flag and nothing in the graph.
+	Config func(path string) fx.Option
+
 	// Format is --format's default: log.FormatJSON for a service, log.FormatText for an operator tool.
 	Format log.Format
 
@@ -69,7 +83,11 @@ func New(o Options) App {
 
 // RootCommand returns cli.NewRootCommand's root with three persistent flags added: --debug, --quiet with the
 // shorthand -q, and --format, a log.Format defaulting to Options.Format. --debug and --quiet are mutually exclusive,
-// on the root and every command under it, and an unknown --format fails while the flags are parsed.
+// on the root and every command under it, and an unknown --format fails while the flags are parsed. When
+// Options.Config is set, it adds --config too, without a shorthand.
+//
+// cli's root defines --config itself before cli v0.3.0. RootCommand then gives that flag the kernel's help when
+// Options.Config is set, and hides it otherwise, with Run rejecting it if it's passed.
 func (a App) RootCommand(name, short string) *cobra.Command {
 	cmd := cli.NewRootCommand(name, short)
 
@@ -79,6 +97,16 @@ func (a App) RootCommand(name, short string) *cobra.Command {
 	flags.BoolP(QuietFlag, "q", false, "log from warn up")
 	// The backquoted word is the value's placeholder in help, which pflag can't name for a TextVar.
 	flags.TextVar(new(log.Format), FormatFlag, a.o.Format, "log `format`: json or text")
+
+	// pflag panics on a name defined twice, so cli's flag is adjusted rather than redefined.
+	switch existing := flags.Lookup(ConfigFlag); {
+	case existing == nil && a.o.Config != nil:
+		flags.String(ConfigFlag, "", configUsage)
+	case existing != nil && a.o.Config != nil:
+		existing.Usage = configUsage
+	case existing != nil:
+		existing.Hidden = true
+	}
 
 	cmd.MarkFlagsMutuallyExclusive(DebugFlag, QuietFlag)
 
@@ -101,18 +129,19 @@ func (a App) Command(use, short string, opts ...fx.Option) *cobra.Command {
 // Run runs cmd's app with kernelrun.Run on cmd's context. The app gets, in order: fx's events through
 // log.NewEventLogger, a module of its own whose invoke makes the app's logger slog's default before any other module's
 // invoke runs, log.Module with the level and format from the root's flags and Options.TextHandler (tint.New when
-// nil), the --config value through configloader.WithFilename, Options.Shared, then opts. An app that also supplies
-// configloader.WithFilename fails to build.
+// nil), Options.Config's option given --config's path when Options.Config is set and returns one, Options.Shared,
+// then opts.
 //
 // While the app runs, the log package writes into the app's logger at Warn, so --quiet keeps what libraries report
 // through it. slog's default logger, the log package's output and flags, and that level are restored when Run returns.
-// A flag the root lacks fails with ErrMissingFlag before any app is built.
+// A flag the root lacks fails with ErrMissingFlag before any app is built; --config is looked for only when
+// Options.Config is set. Without it, a --config passed to cli's root, before cli v0.3.0, fails before any app is built.
 //
 // Once kernelrun.Run returns an error, Run sets cmd.SilenceErrors, since the failure has been logged: by fx's event
 // logger for a build or start failure, by kernelrun for a crash or stop failure, and by Run itself, at Error, for
 // kernelrun's runner checks. The error is still returned, so its exit code reaches cli.Execute.
 func (a App) Run(cmd *cobra.Command, opts ...fx.Option) error {
-	flags, err := readFlags(cmd.Flags())
+	flags, err := readFlags(cmd.Flags(), a.o.Config != nil)
 	if err != nil {
 		return err
 	}
@@ -135,8 +164,13 @@ func (a App) Run(cmd *cobra.Command, opts ...fx.Option) error {
 		log.WithQuiet(flags.quiet),
 		log.WithFormat(flags.format),
 		log.WithTextHandler(textHandler),
-		configloader.WithFilename(flags.config),
 		fx.Populate(&logger),
+	}
+
+	if a.o.Config != nil {
+		if opt := a.o.Config(flags.config); opt != nil {
+			options = append(options, opt)
+		}
 	}
 
 	if a.o.Shared != nil {
@@ -184,9 +218,19 @@ type flagValues struct {
 	config string
 }
 
-// readFlags reads the kernel's and cli's flags from flags, failing with ErrMissingFlag for the first one not defined.
-func readFlags(flags *pflag.FlagSet) (flagValues, error) {
-	for _, name := range []string{DebugFlag, QuietFlag, FormatFlag, cli.ConfigFlag} {
+// readFlags reads the kernel's flags from flags, --config only when config is set, failing with ErrMissingFlag for the
+// first one not defined. Without config, a --config the operator passed, which only cli's root defines before cli
+// v0.3.0, fails with errNoConfig.
+func readFlags(flags *pflag.FlagSet, config bool) (flagValues, error) {
+	names := []string{DebugFlag, QuietFlag, FormatFlag}
+
+	if config {
+		names = append(names, ConfigFlag)
+	} else if f := flags.Lookup(ConfigFlag); f != nil && f.Changed {
+		return flagValues{}, errNoConfig
+	}
+
+	for _, name := range names {
 		if flags.Lookup(name) == nil {
 			return flagValues{}, fmt.Errorf("%w: %s", ErrMissingFlag, name)
 		}
@@ -197,14 +241,19 @@ func readFlags(flags *pflag.FlagSet) (flagValues, error) {
 	debug, debugErr := flags.GetBool(DebugFlag)
 	quiet, quietErr := flags.GetBool(QuietFlag)
 	formatErr := flags.GetText(FormatFlag, &v.format)
-	config, configErr := flags.GetString(cli.ConfigFlag)
+
+	var configErr error
+
+	if config {
+		v.config, configErr = flags.GetString(ConfigFlag)
+	}
 
 	// A flag of the right name but the wrong type, defined by hand, fails here.
 	if err := errors.Join(debugErr, quietErr, formatErr, configErr); err != nil {
 		return flagValues{}, fmt.Errorf("reading flags: %w", err)
 	}
 
-	v.debug, v.quiet, v.config = debug, quiet, config
+	v.debug, v.quiet = debug, quiet
 
 	return v, nil
 }

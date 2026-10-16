@@ -200,7 +200,7 @@ The loader walks `Defaults` with the same leaf rules and calls `SetDefault(key, 
 
 Viper resolves each key on its own, so a file's `hosts` replaces the default `hosts` entirely, and map entries merge entry by entry, as the spec requires. Leaves under a nil pointer get no default, so a nil section stays nil unless the file or the environment sets something in it. The zero `Defaults` sets only zero values, which is the same as having no defaults.
 
-Alternative: decode file and env over a copy of `Defaults`. mapstructure reuses an existing slice by index, so default `[a b c]` overlaid with `[x]` would become `[x b c]` (a spike test pins this so the reason stays visible). Nil-pointer sections would also be pre-allocated by defaults that merely mention them.
+Alternative: decode file and env over a copy of `Defaults`. mapstructure truncates an existing slice to the input's length but reuses its elements by index, so a file's `hosts: [{name: x}]` over default `[{name: a, port: 1}, …]` would become `[{name: x, port: 1}]`, the default's port leaking into the file's host (a spike test pins this so the reason stays visible). Nil-pointer sections would also be pre-allocated by defaults that merely mention them.
 
 ### 11. Decoding hooks, in an order that matters
 
@@ -353,6 +353,13 @@ What changed while applying the first pull request, and why.
 
 - **The loader logs.** Once `log/v0.1.0` shipped, with a logger that needs no config, the "never logs" non-goal became decision 17: the loader reports which file it read, which keys came from the environment, and which unknown keys it ignored, through an optional injected `*slog.Logger`. The loader spec gained a requirement, and tasks 10.1, 12.3 and 14 cover it.
 
+- **mapstructure truncates a pre-filled slice.** Decision 10 said decoding `[x]` over `[a b c]` gives `[x b c]`; v2.5.0 gives `[x]`, but still decodes each element over the old one at its index, so struct elements merge field by field. The decision stands; its reason and the spike test now use struct elements.
+
+- **`,remain` is read by the loader itself.** It checks the tag option beside `configvalidator.KeySegment`, so `config/configvalidator` needed no 0.2.0 release first. A `,remain` field takes no env names and makes its level accept any file key.
+- **Unknown-key matching is narrower than decision 12.** A file key beneath a leaf counts as known only when the leaf has interface type (`any`, or a map whose values are `any`), so `http.port.number` is reported as unknown rather than left to fail in decoding. A file key naming a struct or map section (`http: 5`) counts as known, so it fails in decoding with a type error instead of being reported as unknown.
+- **Keys are lowercased in the table,** as viper stores them, so an untagged field's key is its Go name lowercased in env names, log records and unknown-key errors. Validation errors still use the Go name, as `config/configvalidator` writes it.
+- **docs/config.md points at the change directory** (`openspec/changes`) rather than a file path, since archiving moves the design. Repoint it at the archived design.md when archiving.
+
 ## Fixes from code review
 
 The review of `add-configvalidator` at bc73835 found fifteen issues. All are fixed, each with a regression test, and the spec, README and decisions 3 and 4 above were updated to match.
@@ -376,3 +383,16 @@ The review of `add-configvalidator` at bc73835 found fifteen issues. All are fix
   - The walk reflected over every element of scalar slices, and resolving a map entry rescanned the map for each failure. → Containers that can't hold a Validator are passed over, and each map is indexed once per tag pass.
 - **Design.** Keys flattened into strings early and re-parsed caused three of the above, plus the squash over-suppression decision 3 had accepted. → Positions stay segment lists until a `Key` is written, which removed that accepted trade-off.
 
+## Fixes from code review (second pull request)
+
+The review of `add-configloader` found these: two from reading the diff, the rest from an independent review that confirmed each by running it. Each is fixed with a regression test.
+
+- **`Provide` changed the `Options` its closure captured,** so the same `Provide` option reused in a second app inherited the first app's filename and logger. → The constructor works on a copy.
+- **`envName` uppercased before replacing characters,** and uppercasing some characters outside ASCII yields ASCII letters (`ß` gives `SS`), so an entry named `straße` read `…_STRASSE` instead of the spec's `…_STRA_E`. → Characters are replaced first.
+- **A null file key hid the environment beneath it.** A section left empty in YAML (`http:` with its children commented out) reads as null, and viper's key flattening takes it for a leaf that shadows every key beneath it, env-bound ones included, so `MY_SVC_HTTP_PORT` was read but never decoded, and still logged as set. → The file layer is rebuilt from `AllSettings`, which skips nulls, right after it's read.
+- **A bad duration leaked part of its value.** mapstructure's duration hook cuts `time: invalid duration "…"` at the last space, so `hunter two` left `"hunter` in the error. → The duration hook is wrapped like the text hook (decision 11), naming only the type.
+- **A config type that contains itself recursed forever.** → The walk stops at a struct type it's already inside; that key takes no env names beneath it and accepts any file key there, leaving decoding to check them.
+- **An unexported embedded pointer with `,squash` panicked inside mapstructure,** which can't set it. → `Load` rejects that config type with an error.
+- **Default map keys differing only in case gave a random result,** since both lowercase to one key and map iteration order picked the survivor. → They fail with `ErrEnvNameCollision`. Default entries are now named by their key's text form, as `config/configvalidator` names entries, rather than by `fmt.Sprint`, which a `String` method could change.
+- **A default map entry named `""` or holding a dot broke decoding,** since viper reads a dot as nesting and an empty entry replaces the whole map. → `Load` rejects it. Entries from the file have the same viper limitation, now documented.
+- **Documented, not changed:** mapstructure always allocates a squashed pointer embed, so a nil section stays nil only when it isn't squashed; and names that normalise alike (`my-svc`, `my_svc`) share an env prefix.

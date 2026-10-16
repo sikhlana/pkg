@@ -122,3 +122,58 @@ A program with `configloader.Provide` in `Options.Shared` keeps compiling with `
 ## Migration Plan
 
 Three pull requests, in the order of decision 5. Step 3 waits for `cli/v0.3.0` to be published, since `kernel`'s go.mod requires it. The merges publish `kernel/v0.2.0`, `cli/v0.3.0` with `config/configloader/v0.1.1`, and `kernel/v0.2.1`. go-modules is unaffected.
+
+## What actually happened
+
+Delivered in the three pull requests of decision 5, in order:
+
+- **PR #16** merged as 325d31c and published `kernel/v0.2.0`.
+- **PR #17** merged as 5fd3e26 and published `cli/v0.3.0` and `config/configloader/v0.1.1`.
+- **The third pull request** requires `cli` v0.3.0, drops the adjusting of `cli`'s flag, and publishes `kernel/v0.3.0`, not the planned v0.2.1. It archives this change and syncs the `kernel` and `cli` specs.
+
+Deviations from the design as first written:
+
+- **The third release is `kernel` 0.3.0, not 0.2.1.** Its exported API is unchanged, but gorelease suggests a minor whenever a requirement's major.minor rises, and `cli` went from v0.2.1 to v0.3.0. The release check's floor is that suggestion, so 0.2.1 failed CI.
+- **Decision 3 changed in review, from reusing `cli`'s flag to adjusting it.** Left as it was, `cli`'s flag let a program without `Config` accept `--config` and ignore it. `kernel` 0.2.0 instead gave it the kernel's help with `Config`, and hid and rejected it without. The decision above describes what shipped.
+- **A nil option from `Config` is skipped,** as a nil `Shared` is, rather than panicking in `fx.New`. The kernel spec gained a scenario for it.
+- **The `cli` requirement was renamed** from "claims no single-letter shorthand" to "adds no flags of its own", since cobra's `-h` made the first wording false (decision 4).
+- **`kernel` 0.2.0's reuse paths were tested with `GOWORK=off` in step 2.** Once `cli` 0.3.0 was in the workspace, the reuse test skipped there, and CI doesn't test `kernel` in a `cli` pull request.
+
+Findings:
+
+- **gorelease bumps the minor for a requirement's minor upgrade,** not only for API changes (`requirementsChanged` in its report.go), so a module that takes up a sibling's pre-1.0 minor release takes a minor itself.
+- **pflag names a string flag's value `string` in help** unless its usage holds a backquoted word, the same fix `--format`'s `TextVar` needed.
+- **A test that asserts a sibling's old behaviour has to skip, not pass vacuously,** while the workspace resolves the sibling's new version and the go.mod still requires the old one.
+
+Follow-ups left open:
+
+- **A `configloader` helper returning the function `Options.Config` takes,** if a closure that ignores `path` turns out to be a real trap (a non-goal here).
+- **Release:** merging the third pull request publishes `kernel/v0.3.0`; checking the published release, the proxy and pkg.go.dev happens after merge.
+
+## Fixes from code review
+
+Each step's working tree was reviewed before its pull request.
+
+**Step 1, `kernel` 0.2.0:** eight issues; six fixed (task section 3) and two needed no change.
+
+- **`cli`'s `--config` accepted and ignored** in a program without `Config`. → Hidden from help and rejected by `Run`, with an unexported error, since step 3 removes it.
+- **A nil option from `Config` panicked in `fx.New`.** → Skipped.
+- **The placeholder test matched `cli`'s `string` too.** → It asserts `--config file` exactly.
+- **The reuse test would pass without testing reuse** once `cli` dropped the flag. → It skips, saying why.
+- **`docs/kernel.md` and the README described the reuse.** → They describe the hiding and the rejection.
+- No change for the reused flag's type, always a string on `cli.NewRootCommand`, or for tying `ConfigFlag` to `cli.ConfigFlag`, which step 2 had to make unnecessary.
+
+**Step 2, `cli` 0.3.0:** five issues; four fixed (task section 6) and one left for step 3.
+
+- **"Claims no single-letter shorthand"** was false next to cobra's `-h`. → Godoc, README row and spec say the root adds no flags of its own beyond cobra's `--help` and `--version`.
+- **`configloader`'s example for programs without `kernel`** defined `--config` on the root's local flags. → `PersistentFlags`, so subcommands accept it.
+- **`kernel` 0.2.0's paths for `cli`'s flag went untested** in the workspace. → Run with `GOWORK=off` against the published `cli` v0.2.1.
+- **The help test asserted `NotContains("--config")`.** → Dropped; `TestRootHasNoConfigFlag` stays, as the spec's scenario.
+- The main specs still described the old `--config` until the archive, as planned. → Synced with step 3.
+
+**Step 3, `kernel` 0.3.0 (planned as 0.2.1):** four low-severity issues, all fixed (task section 8).
+
+- **The README didn't say that the third release requires `cli` 0.3.0.** → It does, and says a command built straight from `cli.NewRootCommand` that read `cli`'s `--config` defines its own flag.
+- **The migration note said "as an unknown flag",** true only from the third release. → "Naming the flag", true of both releases.
+- **The unknown-flag test asserted cobra's exact wording.** → It asserts the error names `--config`, the exit code, and that the app didn't run.
+- **Two comments explained the backquoted placeholder.** → One, above both flags.

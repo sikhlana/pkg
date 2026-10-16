@@ -28,20 +28,13 @@ const (
 	FormatFlag = "format"
 
 	// ConfigFlag is the name of the persistent flag RootCommand adds, when Options.Config is set, to pass the config
-	// file, --config. It's the name cli's root gave its own flag before cli v0.3.0, which RootCommand adjusts instead.
+	// file, --config.
 	ConfigFlag = "config"
 )
-
-// configUsage is --config's help text. The backquoted word is the value's placeholder.
-const configUsage = "path to the config `file`"
 
 // ErrMissingFlag is returned by App.Run for a command whose root wasn't built by App.RootCommand. The error names the
 // first flag missing.
 var ErrMissingFlag = errors.New("missing kernel flag")
-
-// errNoConfig is returned by App.Run when the operator passes cli's --config, which cli's root still defines before
-// cli v0.3.0, to a program that loads no config.
-var errNoConfig = errors.New("--config: this program loads no config")
 
 // Options holds a program's developer settings, shared by every command it builds.
 type Options struct {
@@ -85,9 +78,6 @@ func New(o Options) App {
 // shorthand -q, and --format, a log.Format defaulting to Options.Format. --debug and --quiet are mutually exclusive,
 // on the root and every command under it, and an unknown --format fails while the flags are parsed. When
 // Options.Config is set, it adds --config too, without a shorthand.
-//
-// cli's root defines --config itself before cli v0.3.0. RootCommand then gives that flag the kernel's help when
-// Options.Config is set, and hides it otherwise, with Run rejecting it if it's passed.
 func (a App) RootCommand(name, short string) *cobra.Command {
 	cmd := cli.NewRootCommand(name, short)
 
@@ -95,17 +85,12 @@ func (a App) RootCommand(name, short string) *cobra.Command {
 
 	flags.Bool(DebugFlag, false, "log from debug up")
 	flags.BoolP(QuietFlag, "q", false, "log from warn up")
-	// The backquoted word is the value's placeholder in help, which pflag can't name for a TextVar.
+	// A backquoted word in a flag's usage is its value's placeholder in help: pflag can't name one for a TextVar, and
+	// would call --config's "string".
 	flags.TextVar(new(log.Format), FormatFlag, a.o.Format, "log `format`: json or text")
 
-	// pflag panics on a name defined twice, so cli's flag is adjusted rather than redefined.
-	switch existing := flags.Lookup(ConfigFlag); {
-	case existing == nil && a.o.Config != nil:
-		flags.String(ConfigFlag, "", configUsage)
-	case existing != nil && a.o.Config != nil:
-		existing.Usage = configUsage
-	case existing != nil:
-		existing.Hidden = true
+	if a.o.Config != nil {
+		flags.String(ConfigFlag, "", "path to the config `file`")
 	}
 
 	cmd.MarkFlagsMutuallyExclusive(DebugFlag, QuietFlag)
@@ -135,7 +120,7 @@ func (a App) Command(use, short string, opts ...fx.Option) *cobra.Command {
 // While the app runs, the log package writes into the app's logger at Warn, so --quiet keeps what libraries report
 // through it. slog's default logger, the log package's output and flags, and that level are restored when Run returns.
 // A flag the root lacks fails with ErrMissingFlag before any app is built; --config is looked for only when
-// Options.Config is set. Without it, a --config passed to cli's root, before cli v0.3.0, fails before any app is built.
+// Options.Config is set.
 //
 // Once kernelrun.Run returns an error, Run sets cmd.SilenceErrors, since the failure has been logged: by fx's event
 // logger for a build or start failure, by kernelrun for a crash or stop failure, and by Run itself, at Error, for
@@ -219,15 +204,12 @@ type flagValues struct {
 }
 
 // readFlags reads the kernel's flags from flags, --config only when config is set, failing with ErrMissingFlag for the
-// first one not defined. Without config, a --config the operator passed, which only cli's root defines before cli
-// v0.3.0, fails with errNoConfig.
+// first one not defined.
 func readFlags(flags *pflag.FlagSet, config bool) (flagValues, error) {
 	names := []string{DebugFlag, QuietFlag, FormatFlag}
 
 	if config {
 		names = append(names, ConfigFlag)
-	} else if f := flags.Lookup(ConfigFlag); f != nil && f.Changed {
-		return flagValues{}, errNoConfig
 	}
 
 	for _, name := range names {

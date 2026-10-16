@@ -199,7 +199,7 @@ func TestConfigHelpShowsAPlaceholder(t *testing.T) {
 	assert.Regexp(t, `--config file\s`, help.String())
 }
 
-func TestWithoutConfigHelpHidesTheFlag(t *testing.T) {
+func TestWithoutConfigHelpHasNoFlag(t *testing.T) {
 	root, _ := program(kernel.Options{})
 
 	var help bytes.Buffer
@@ -212,7 +212,7 @@ func TestWithoutConfigHelpHidesTheFlag(t *testing.T) {
 	assert.NotContains(t, help.String(), "--config")
 }
 
-func TestWithoutConfigTheFlagIsRejected(t *testing.T) {
+func TestWithoutConfigTheFlagIsUnknown(t *testing.T) {
 	var ran bool
 
 	root, _ := program(kernel.Options{}, flagRunner(&ran))
@@ -233,30 +233,6 @@ func TestConfigReturningNil(t *testing.T) {
 
 	require.Equal(t, 0, code, stderr)
 	assert.True(t, ran, "the app didn't run")
-}
-
-func TestConfigReusesTheRootsFlag(t *testing.T) {
-	if cli.NewRootCommand("myapp", "").PersistentFlags().Lookup(kernel.ConfigFlag) == nil {
-		t.Skip("cli's root no longer defines --config, so there's no flag to reuse")
-	}
-
-	var got string
-
-	app := kernel.New(kernel.Options{Config: func(path string) fx.Option {
-		got = path
-
-		return fx.Options(log.WithDestination(io.Discard))
-	}})
-
-	root := app.RootCommand("myapp", "A test program")
-	root.AddCommand(app.Command("run", "Runs the app", kernelrun.WithRunner("app", returnNil)))
-
-	require.NotNil(t, root.PersistentFlags().Lookup(kernel.ConfigFlag))
-
-	code, _ := execute(t, root, "run", "--config", "./app.yaml")
-
-	require.Equal(t, 0, code)
-	assert.Equal(t, "./app.yaml", got)
 }
 
 func TestWithoutConfigNoConfigFlagLookedFor(t *testing.T) {

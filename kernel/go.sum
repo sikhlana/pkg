@@ -4,8 +4,8 @@ github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLf
 github.com/lmittmann/tint v1.2.1 h1:zOadah+f+nSm3jZM044jOsqh0+vSfgG/d9Ota9a/TLE=
 github.com/lmittmann/tint v1.2.1/go.mod h1:HIS3gSy7qNwGCj+5oRjAutErFBl4BzdQP6cJZ0NfMwE=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
-github.com/sikhlana/pkg/cli v0.2.1 h1:edWcG5T6IUxPnztzd9jJJwL4xXWv429+yjXQpuUPcm0=
-github.com/sikhlana/pkg/cli v0.2.1/go.mod h1:PuyqU80fsIizbchNBE4cD1vmsLUiYSjDly6vfjdAhb4=
+github.com/sikhlana/pkg/cli v0.3.0 h1:W7xR0/6pDRlN4JmqWHBuQbubRkxWm7Y7D9/sDA7Tb2A=
+github.com/sikhlana/pkg/cli v0.3.0/go.mod h1:PuyqU80fsIizbchNBE4cD1vmsLUiYSjDly6vfjdAhb4=
 github.com/sikhlana/pkg/kernelrun v0.1.0 h1:CGJ0mo1suXtynewh7K8shpAz2zZK3HdoCYHFyAm1x5c=
 github.com/sikhlana/pkg/kernelrun v0.1.0/go.mod h1:XbDRKdjADkwbmO9mcvZZYzKYYDIKxLbvtN59Kt1lEOo=
 github.com/sikhlana/pkg/log v0.1.0 h1:OWdrNq5TLpr733vC52B0rSMhYF8kbhDti9NEnJClJUA=

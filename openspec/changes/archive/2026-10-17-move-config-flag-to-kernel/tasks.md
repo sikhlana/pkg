@@ -68,10 +68,20 @@ The review of step 2's working tree found five issues. Four are fixed below; one
 
 Section 7 is the third pull request, `refactor(kernel):`, and waits for `cli/v0.3.0` to be published, since `kernel`'s go.mod requires it.
 
-- [ ] 7.1 Once `cli/v0.3.0` is published, branch `kernel-cli-0.3` off `origin/main` after `git fetch`.
-- [ ] 7.2 Bump `kernel/VERSION` from 0.2.0 to 0.2.1: a patch, for internals and a dependency.
-- [ ] 7.3 Require `cli` v0.3.0, and drop the adjusting of cli's flag: `RootCommand`'s check for an existing `--config`, the help swap and the hiding, and `Run`'s rejection with `errNoConfig`. `ConfigFlag`'s comment stops mentioning cli's flag.
-- [ ] 7.4 Tests: the reuse test goes; a program without `Config` rejects `--config ./app.yaml` before building an app, now as cobra's unknown flag; help without `Config` still shows no `--config`.
-- [ ] 7.5 `kernel/README.md`: drop any note about `cli`'s flag between releases.
-- [ ] 7.6 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`. Confirm `GOWORK=off go build ./...` and `go mod tidy -diff` are clean.
-- [ ] 7.7 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.6 and 7.7.
+- [x] 7.1 Once `cli/v0.3.0` is published, branch `kernel-cli-0.3` off `origin/main` after `git fetch`.
+- [x] 7.2 Bump `kernel/VERSION` from 0.2.0 to 0.2.1: a patch, for internals and a dependency.
+- [x] 7.3 Require `cli` v0.3.0, and drop the adjusting of cli's flag: `RootCommand`'s check for an existing `--config`, the help swap and the hiding, and `Run`'s rejection with `errNoConfig`. `ConfigFlag`'s comment stops mentioning cli's flag.
+- [x] 7.4 Tests: the reuse test goes; a program without `Config` rejects `--config ./app.yaml` before building an app, now as cobra's unknown flag; help without `Config` still shows no `--config`.
+- [x] 7.5 `kernel/README.md`: drop any note about `cli`'s flag between releases.
+- [x] 7.6 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`. Confirm `GOWORK=off go build ./...` and `go mod tidy -diff` are clean.
+- [x] 7.7 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.6 and 7.7.
+
+## 8. kernel 0.2.1 code review fixes
+
+The review of step 3's working tree found four low-severity issues and no correctness bugs. All are fixed below.
+
+- [x] 8.1 `kernel/README.md` says that from 0.2.1 the kernel requires cli 0.3.0, so updating the kernel updates cli too, and a command built straight from `cli.NewRootCommand` that read cli's `--config` defines its own flag. The version stays a patch: the kernel's API is unchanged, and dependency updates are patches.
+- [x] 8.2 The README's migration section says a stray `--config` fails "naming the flag" rather than "as an unknown flag", true for 0.2.0's rejection and 0.2.1's cobra error alike.
+- [x] 8.3 The unknown-flag test asserts that the error names `--config`, the exit code and that the app didn't run, rather than cobra's exact wording.
+- [x] 8.4 One comment above both flags explains the backquoted placeholder, replacing the duplicate on `--config`.
+- [x] 8.5 Repeat 7.6 and 7.7: lint reports 0 issues, `go test ./...` and `go test -race ./...` pass in `kernel/`, `GOWORK=off` builds, tests and tidies clean, and the `-short` sweep passes across all six modules.

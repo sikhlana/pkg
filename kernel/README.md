@@ -97,8 +97,6 @@ func root() *cobra.Command {
 | --format | json or text. Defaults to Options.Format; any other value fails before an app is built. |
 | --config | The config file, given to Options.Config. Present only when Options.Config is set. |
 
-While `cli`'s root still defines `--config` (before `cli` v0.3.0), `RootCommand` adjusts that flag rather than defining its own. With `Options.Config` set, the flag gets the kernel's help. Without it, the flag is hidden from help, and passing it fails before any app is built, naming `--config`.
-
 #### What each app gets
 
 In order:
@@ -116,6 +114,8 @@ A command checks its config by registering a runner that returns once the config
 #### Moving from kernel 0.1.0
 
 Before 0.2.0 the kernel supplied `configloader.WithFilename` with `--config`'s value. It no longer imports `configloader`, so a program with `configloader.Provide` in `Options.Shared` still compiles, but `--config` no longer reaches the loader. Passing `--config` to that program fails before any app is built, naming the flag, so the missing migration shows up at once; without `--config`, the loader searches as it always did. Move the loader into `Options.Config` and pass the path as `configloader.Options.Filename`, as the example above does.
+
+From 0.3.0, the kernel requires `cli` 0.3.0, whose root no longer defines `--config`, so updating the kernel updates `cli` too. A command built straight from `cli.NewRootCommand` that read cli's `--config` defines its own flag.
 
 #### How failures are reported
 

@@ -110,17 +110,17 @@ A root command built by the module SHALL print a failing command's error once on
 - **WHEN** a subcommand silences its errors and returns an exit error with code 1 and no underlying error
 - **THEN** nothing is printed and Execute returns 1
 
-### Requirement: Every command accepts --config
+### Requirement: The root adds no flags of its own
 
-A root command built by the module SHALL accept a string flag `--config`, defaulting to empty, on itself and every subcommand. The module SHALL NOT claim any single-letter shorthand on the program's commands.
-
-#### Scenario: Subcommand reads the flag
-- **WHEN** a program runs `myapp serve --config /etc/myapp.yaml`
-- **THEN** the serve command reads `/etc/myapp.yaml` as the config flag's value
+A root command built by the module SHALL add no flags of its own beyond cobra's help and version flags, and SHALL claim no single-letter shorthand beyond cobra's: `-h` for help, and `-v` for `--version` only while no other flag takes it. Every other flag name and letter SHALL stay free for the program's commands.
 
 #### Scenario: Subcommand uses -c
 - **WHEN** a subcommand defines its own flag with shorthand `-c` and a program runs it with `-c 4`
 - **THEN** the subcommand runs and reads 4 from its own flag
+
+#### Scenario: No config flag
+- **WHEN** a program runs `myapp serve --config /etc/myapp.yaml` under a root built by the module alone
+- **THEN** the command fails as an unknown flag
 
 ### Requirement: One version line
 

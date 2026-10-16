@@ -17,7 +17,7 @@ Fails a pull request when any of these breaks:
 - Every changed module has a `VERSION` holding exactly `MAJOR.MINOR.PATCH`, whose major the module path takes: v0 or v1 without a `/vN` suffix, vN with one.
 - A module that's absent on `--base` and has never been released starts at its first version: `0.1.0`, or `N.0.0` in a `<dir>/vN` directory. A module absent on `--base` that was released before it was removed continues above its last release. Any other changed module's `VERSION` is greater than on `--base`.
 - The module's tag for `VERSION` doesn't exist yet. Tags are `<dir>/v<VERSION>`, except that a module in a major version directory drops it, as the go command expects: `logger/v2` at 2.1.0 is tagged `logger/v2.1.0`.
-- `VERSION` is at least the version gorelease suggests from the exported-API diff against the module's highest release (or against nothing, for a module with no release). A breaking change past v1 fails at any version: it needs a new major module path.
+- `VERSION` is at least the version gorelease suggests from the exported-API diff, and from a go.mod that raises a requirement's minor or the go directive, against the module's highest release (or against nothing, for a module with no release). A breaking change past v1 fails at any version: it needs a new major module path.
 - Whatever changed:
   - `go.work` lists exactly the directories outside `tools/` with a `go.mod`;
   - every library module has a `README.md`, a `VERSION`, and the module path `<repository path>/<dir>`, the repository path coming from this tool's own `go.mod`;

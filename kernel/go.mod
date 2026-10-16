@@ -3,7 +3,7 @@ module github.com/sikhlana/pkg/kernel
 go 1.27
 
 require (
-	github.com/sikhlana/pkg/cli v0.2.1
+	github.com/sikhlana/pkg/cli v0.3.0
 	github.com/sikhlana/pkg/kernelrun v0.1.0
 	github.com/sikhlana/pkg/log v0.1.0
 	github.com/spf13/cobra v1.10.2

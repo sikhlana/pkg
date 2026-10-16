@@ -16,13 +16,13 @@ kernel      cobra, cli, log, log/tint, kernelrun
 
 Every server and receiver registers a runner, so whatever holds the runner contract is imported by all of them. go-modules kept it in the same module as everything else the kernel did, so one import would have pulled cobra, viper and log into every loop module. Here the contract and the lifecycle live in `kernelrun`, which needs only fx. The wiring of flags and logging lives in `kernel`, which only apps import, and which changes whenever `cli` or `log` do.
 
+The run's outcome, `kernelrun/runerr`, is a package inside `kernelrun` rather than a module of its own. Its readers are OnStop hooks, which already depend on fx, and the lifecycle that writes it lives beside it.
+
 ## Config loading is the program's, given the path
 
 `kernel` owns `--config` but not the loader. `Options.Config` is a function the kernel calls with `--config`'s path, empty when the operator passed none, and the fx option it returns joins every command's app after the logger's wiring and ahead of `Options.Shared`, so the loader reports through the app's logger and the shared modules can take the config. A program that leaves it nil loads no config: its root doesn't take `--config`, and nothing of config loading is built into it.
 
-Calling `configloader` from the kernel would have built viper's tree into every app, config or not. Making the kernel generic over the config type would have tied every program, even one without config, to `configloader`'s options through the kernel's signature. A function of the path keeps the import in the program, at the cost that a closure ignoring the path silently ignores `--config`.
-
-The run's outcome, `kernelrun/runerr`, is a package inside `kernelrun` rather than a module of its own. Its readers are OnStop hooks, which already depend on fx, and the lifecycle that writes it lives beside it.
+Calling `configloader` from the kernel would have built viper's tree into every app, config or not. Making the kernel generic over the config type would have tied every program, even one without config, to `configloader`'s options through the kernel's signature. A function of the path keeps the import in the program, at the cost that a closure ignoring the path silently ignores `--config`. The full discussion, including the three-step release that moved the flag out of `cli`, is in the archived [move-config-flag-to-kernel](../openspec/changes/archive/2026-10-17-move-config-flag-to-kernel/design.md) change.
 
 ## One way to end an app: a runner returns
 

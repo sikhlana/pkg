@@ -1,8 +1,10 @@
+# configloader Specification
+
 ## Purpose
 
 Reads an application's configuration from typed defaults, a config file and the environment into its config struct, so every field is settable from the file or the environment, secrets can come from files, and a misconfiguration stops the program at startup with errors naming the keys.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Defaults, then the file, then the environment
 
@@ -30,7 +32,7 @@ The loader SHALL build the config from three layers, each overriding the one bef
 
 ### Requirement: An explicit config file must exist
 
-When the caller supplies a config file path, the loader SHALL read that file, with its extension choosing the format, and SHALL fail, naming the path, when the file is missing, unreadable or malformed, or its extension names no supported format.
+When the caller supplies a config file path, the loader SHALL read that file, with its extension choosing the format, and SHALL fail, naming the path, when the file is missing, unreadable or malformed, or its extension names no supported format. A file that can't be parsed SHALL fail naming its format and, where the parser reports one, the position, and the error SHALL NOT quote the file's contents.
 
 #### Scenario: Missing file
 - **WHEN** the supplied path doesn't exist
@@ -40,17 +42,41 @@ When the caller supplies a config file path, the loader SHALL read that file, wi
 - **WHEN** the supplied file has a syntax error
 - **THEN** the load fails with an error naming the path
 
+#### Scenario: Malformed file isn't quoted
+- **WHEN** the supplied file has a syntax error on the line holding `password = "hunter2"`
+- **THEN** the load fails with an error naming the path, the format and the line, and the error doesn't contain "hunter2"
+
 #### Scenario: Unsupported extension
 - **WHEN** the supplied path ends in an extension no supported format uses
 - **THEN** the load fails with an error naming the path
 
 ### Requirement: Without one, a config file is searched for
 
-Without an explicit path, the loader SHALL look for a file named `config` with any supported extension in the caller's extra search directories, in the order given, then in `/etc/<name>/`, `$HOME/.<name>/` and the working directory, and SHALL read the first one it finds. Finding none SHALL NOT be an error; the config then comes from the defaults and the environment. A file it finds but can't read or parse SHALL fail the load, with an error naming that file's path.
+Without an explicit path, the loader SHALL search, most specific place first, and SHALL read the first file it finds: `config.<ext>` in each of the caller's extra search directories, in the order given; then `.<name>.<ext>` in the working directory; then `config.<ext>` in `$HOME/.config/<name>/`, `$HOME/.<name>/` and `/etc/<name>/`. Each place SHALL be tried with every format the loader can decode, and a file in any other format SHALL be passed over. An explicit path SHALL be the only file read. Finding none SHALL NOT be an error; the config then comes from the defaults and the environment. A file it finds but can't read or parse SHALL fail the load, with an error naming that file's path.
 
 #### Scenario: Extra directory comes first
-- **WHEN** the caller adds a search directory containing `config.toml` and the working directory also has one
+- **WHEN** the caller adds a search directory containing `config.toml` and the working directory holds `.my-svc.toml`
 - **THEN** the loader reads the file in the caller's directory
+
+#### Scenario: Working directory's file is named after the app
+- **WHEN** the working directory holds `.my-svc.toml` and nothing else is found
+- **THEN** the loader reads it
+
+#### Scenario: Generic file in the working directory
+- **WHEN** the working directory holds only `config.toml`
+- **THEN** no file is read
+
+#### Scenario: Most specific place wins
+- **WHEN** `.my-svc.yaml` in the working directory, `$HOME/.config/my-svc/config.yaml` and `$HOME/.my-svc/config.yaml` all exist
+- **THEN** the loader reads the working directory's file; without it, the one in `$HOME/.config/my-svc/`; without that, the one in `$HOME/.my-svc/`
+
+#### Scenario: Format without a decoder
+- **WHEN** `$HOME/.config/my-svc/config.ini` and `$HOME/.my-svc/config.yaml` exist
+- **THEN** the loader passes over the `.ini` file and reads the YAML one
+
+#### Scenario: Explicit path alone
+- **WHEN** the caller supplies a config file path and the working directory also holds `.my-svc.yaml`
+- **THEN** only the supplied file is read
 
 #### Scenario: No file anywhere
 - **WHEN** no search directory has a config file and the environment sets `http.port`
@@ -62,7 +88,7 @@ Without an explicit path, the loader SHALL look for a file named `config` with a
 
 ### Requirement: The name sets the environment prefix
 
-The loader SHALL fail when the name is empty or contains anything other than ASCII letters, digits, `-` and `_`. A key's env name SHALL be the name, uppercased with `-` replaced by `_`, followed by `_` and the key, uppercased with every character other than ASCII letters, digits and `_` replaced by `_`.
+The loader SHALL fail when the name is empty, starts with a digit, or contains anything other than ASCII letters, digits, `-` and `_`. A key's env name SHALL be the name, uppercased with `-` replaced by `_`, followed by `_` and the key, uppercased with every character other than ASCII letters, digits and `_` replaced by `_`.
 
 #### Scenario: Env name of a nested key
 - **WHEN** the name is `my-svc` and the key is `http.read_timeout`
@@ -71,6 +97,10 @@ The loader SHALL fail when the name is empty or contains anything other than ASC
 #### Scenario: Empty name
 - **WHEN** the name is empty
 - **THEN** the load fails
+
+#### Scenario: Name starting with a digit
+- **WHEN** the name is `1password-sync`
+- **THEN** the load fails, since no shell can export the env names it would give
 
 #### Scenario: Name with a path separator
 - **WHEN** the name is `../etc`
@@ -186,7 +216,7 @@ A key in the config file that matches no field SHALL fail the load, with an erro
 
 ### Requirement: Values decode by type
 
-Wherever a value comes from, the loader SHALL decode a duration from a string such as `30s`, a slice from a comma-separated string, and any type that decodes itself from text from its text form. A value that fails to decode SHALL fail the load with an error naming the key and the expected type, and SHALL NOT contain the value.
+Wherever a value comes from, the loader SHALL decode a duration from a string such as `30s`, a slice from a comma-separated string with the spaces around each element trimmed, a byte slice from a string's bytes as they are, and any type that decodes itself from text from its text form. A value that fails to decode SHALL fail the load with an error naming the key and the expected type, and SHALL NOT contain the value.
 
 #### Scenario: Duration
 - **WHEN** `MY_SVC_HTTP_READ_TIMEOUT` is `30s`
@@ -195,6 +225,14 @@ Wherever a value comes from, the loader SHALL decode a duration from a string su
 #### Scenario: Comma-separated slice
 - **WHEN** `MY_SVC_HOSTS` is `a,b`
 - **THEN** the loaded `hosts` holds a and b
+
+#### Scenario: Spaces after commas
+- **WHEN** `MY_SVC_HOSTS` is `a, b`
+- **THEN** the loaded `hosts` holds a and b, without a leading space
+
+#### Scenario: Byte slice from a secret file
+- **WHEN** `MY_SVC_KEY_FILE` names a file holding `abc,def` for a `[]byte` field
+- **THEN** the loaded key is those seven bytes, unsplit
 
 #### Scenario: Text-decoded types
 - **WHEN** the file sets `log.level` to `debug` for a `slog.Level` field and `trusted` to `10.0.0.0/8` for a `netip.Prefix` field
@@ -226,15 +264,55 @@ The loader SHALL validate the decoded config with the shared validation rules be
 
 ### Requirement: Loading has no side effects
 
-A load SHALL NOT modify the process environment or any state shared with other loads. Loads with different names or config types in one process SHALL NOT affect each other.
+A load SHALL NOT modify the process environment or any state shared with other loads, and the loaded config SHALL share no map, slice or pointer with the caller's defaults. Loads with different names or config types in one process SHALL NOT affect each other.
 
 #### Scenario: Secret stays out of the environment
 - **WHEN** `db.password` is loaded through `MY_SVC_DB_PASSWORD_FILE`
 - **THEN** `MY_SVC_DB_PASSWORD` is still unset in the process environment afterwards
 
+#### Scenario: Loaded config doesn't alias the defaults
+- **WHEN** a load's result has a slice or map from the defaults changed, and the same options are loaded again
+- **THEN** the second load returns the defaults unchanged
+
 #### Scenario: Independent loads
 - **WHEN** a process loads two config types under two names
 - **THEN** each load sees only its own defaults, file and env names
+
+### Requirement: Loading is reported through the caller's logger
+
+The loader SHALL report through the logger it's given, or under fx through the app's logger when the app provides one. It SHALL report at Info which config file it read, or that the search found none, naming the directories it searched. It SHALL report at Debug each key set from its env variable or read through its file variable, naming the key, the variable and, for a file variable, the file's path. It SHALL report at Warn each unknown file key it ignores because unknown keys are allowed, naming the key. No record SHALL contain a config value or a secret file's contents. Failures SHALL be returned, not logged. Without a logger, the loader SHALL load the same way and report nothing.
+
+#### Scenario: File read
+- **WHEN** the search finds a config file
+- **THEN** an Info record names that file's path
+
+#### Scenario: No file found
+- **WHEN** the search finds no config file
+- **THEN** an Info record says so and names each place searched
+
+#### Scenario: Key from the environment
+- **WHEN** `MY_SVC_HTTP_PORT` sets `http.port` to 9191
+- **THEN** a Debug record names `http.port` and `MY_SVC_HTTP_PORT`, and no record contains 9191
+
+#### Scenario: Key from a secret file
+- **WHEN** `db.password` is read through `MY_SVC_DB_PASSWORD_FILE`
+- **THEN** a Debug record names the key, the variable and the file's path, and no record contains the file's contents
+
+#### Scenario: Ignored unknown key
+- **WHEN** unknown keys are allowed and the file sets `htpp.port`
+- **THEN** a Warn record names `htpp.port`
+
+#### Scenario: Failure is returned, not logged
+- **WHEN** the loaded `http.port` fails its `min=1024` rule
+- **THEN** the violation is in the returned error, and no record mentions it
+
+#### Scenario: No logger
+- **WHEN** the caller gives no logger
+- **THEN** the load behaves the same and writes nothing
+
+#### Scenario: The fx app's logger
+- **WHEN** an fx app provides a `*slog.Logger` and loads its config through the loader's provider
+- **THEN** the loader reports through that logger
 
 ### Requirement: An fx app loads its config once, from the path it supplies
 

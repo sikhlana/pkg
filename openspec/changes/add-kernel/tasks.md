@@ -1,6 +1,6 @@
 ## 1. kernelrun scaffold
 
-Sections 1 to 5 are the first pull request. `kernelrun` and `kernel` are new, so each starts at 0.1.0 with no bump task, and no other module changes. Neither has mocked interfaces, so there's no go generate task. Nothing is copied from go-modules' `kernel`: code, godoc and comments are all written here, from what this code does.
+Sections 1 to 6 are the first pull request. `kernelrun` and `kernel` are new, so each starts at 0.1.0 with no bump task, and no other module changes. Neither has mocked interfaces, so there's no go generate task. Nothing is copied from go-modules' `kernel`: code, godoc and comments are all written here, from what this code does.
 
 - [x] 1.1 Branch `add-kernelrun` off `origin/main` after `git fetch`.
 - [x] 1.2 Create `kernelrun/`:
@@ -61,43 +61,57 @@ Sections 1 to 5 are the first pull request. `kernelrun` and `kernel` are new, so
 - [x] 5.1 In `kernelrun/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
 - [x] 5.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 5.1 and 5.2.
 
-## 6. kernel scaffold
+## 6. kernelrun code review fixes
 
-Sections 6 to 9 are the second pull request, and wait for `kernelrun/v0.1.0` to be published.
+The review of 6804fea found ten issues; nine are fixed below and one needed no change. Design decision 3, the kernelrun spec and the proposal record the outcome.
 
-- [ ] 6.1 Once `kernelrun/v0.1.0` is published, branch `add-kernel-wiring` off `origin/main` after `git fetch`.
-- [ ] 6.2 Create `kernel/`:
+- [x] 6.1 A runner's context error is clean once that context is done, whether cancelled or past the caller's deadline (`errors.Is(err, runCtx.Err())`), so a runner returning `ctx.Err()` at the caller's deadline is no longer a crash. Tests: the caller's deadline ending every runner cleanly, and `DeadlineExceeded` returned early being a crash.
+- [x] 6.2 A start failure is clean only when it is the caller's context's own ending; any other start failure is returned even if the context has ended since. A caller's deadline during start is clean. Tests: the deadline during start, a hook failure reported, and the rule itself through an exported `EndedBy` for timings `Run`'s tests can't arrange.
+- [x] 6.3 The start context carries `runerr.ErrNotStarted`, so OnStop hooks rolled back after a failed start never read a clean nil. Test: a started hook's OnStop reads it after a later hook fails.
+- [x] 6.4 A runner exiting through `runtime.Goexit` is a crash, `running <name>: exited without returning`, and still stops the others: classification and the cancellation run in a `defer`. Test: a `Goexit` runner with a waiting sibling and an OnStop hook.
+- [x] 6.5 Build failures read `building the app:`, hook failures `starting the app:`.
+- [x] 6.6 `call` uses a named return with a deferred `recover` instead of a nested closure.
+- [x] 6.7 README: the clean rule, the two prefixes, `runerr.ErrNotStarted`, `Goexit`, and a bounded `Shutdown` in the server example, since `Run` waits for every runner before the stop timeout applies.
+- [x] 6.8 No change for the missing `AsRunner`: runners are a group, and the constitution's group rule (constant, `ProvideX` helper, collector) is met, as `log`'s `WithMiddleware` and `ProvideMiddleware` are.
+- [x] 6.9 Repeat 5.1 and 5.2: lint reports 0 issues, `go test ./...` and `go test -race ./...` pass in `kernelrun/`, and the `-short` sweep passes across all five modules.
+
+## 7. kernel scaffold
+
+Sections 7 to 10 are the second pull request, and wait for `kernelrun/v0.1.0` to be published.
+
+- [ ] 7.1 Once `kernelrun/v0.1.0` is published, branch `add-kernel-wiring` off `origin/main` after `git fetch`.
+- [ ] 7.2 Create `kernel/`:
   - `go.mod` for `github.com/sikhlana/pkg/kernel`, with the go directive from `.go-version`;
   - `VERSION` containing `0.1.0`;
   - require the published `kernelrun`, `cli`, `log` and `config/configloader`, and the latest spf13/cobra, go.uber.org/fx and stretchr/testify.
   - Done when `go build ./...` passes from `kernel/`, and with `GOWORK=off`.
-- [ ] 6.3 Register `./kernel` in the root `go.work`.
-- [ ] 6.4 Settle the cobra question with a test that stays: `--debug` and `--quiet`, made mutually exclusive on the root, are rejected together on a subcommand.
+- [ ] 7.3 Register `./kernel` in the root `go.work`.
+- [ ] 7.4 Settle the cobra question with a test that stays: `--debug` and `--quiet`, made mutually exclusive on the root, are rejected together on a subcommand.
 
-## 7. Commands and wiring
+## 8. Commands and wiring
 
-- [ ] 7.1 `DebugFlag`, `QuietFlag`, `FormatFlag`, `ErrMissingFlag`, `Options`, `App`, `New` and `RootCommand`: `cli`'s root, `--debug`, `--quiet` with `-q`, mutual exclusion, and `--format` as a `TextVar` defaulting to `Options.Format`. See design decisions 6 and 7.
-- [ ] 7.2 `Run`, as in design decision 7: the flags read from `cmd.Flags()` (`--format` with `GetText`), a missing one failing with `ErrMissingFlag`; the options in the design's order; slog's default saved and restored around `kernelrun.Run`; and `cmd.SilenceErrors` set whenever `kernelrun.Run` returns an error.
-- [ ] 7.3 `Command`, taking no arguments and running the app with its options.
-- [ ] 7.4 Tests through `cli.Execute`, with a recording destination supplied in `Shared` and runners from `kernelrun.WithRunner`:
+- [ ] 8.1 `DebugFlag`, `QuietFlag`, `FormatFlag`, `ErrMissingFlag`, `Options`, `App`, `New` and `RootCommand`: `cli`'s root, `--debug`, `--quiet` with `-q`, mutual exclusion, and `--format` as a `TextVar` defaulting to `Options.Format`. See design decisions 6 and 7.
+- [ ] 8.2 `Run`, as in design decision 7: the flags read from `cmd.Flags()` (`--format` with `GetText`), a missing one failing with `ErrMissingFlag`; the options in the design's order; slog's default saved and restored around `kernelrun.Run`; and `cmd.SilenceErrors` set whenever `kernelrun.Run` returns an error.
+- [ ] 8.3 `Command`, taking no arguments and running the app with its options.
+- [ ] 8.4 Tests through `cli.Execute`, with a recording destination supplied in `Shared` and runners from `kernelrun.WithRunner`:
   - the root's flags: `-q` on a subcommand, `--debug --quiet` together, `--format yaml`, and the program's default format;
   - the app: the level, the program's text handler, tint by default, fx's events under `--debug`, `--config` reaching the loader, and shared and own options together;
   - a root without the kernel's flags, and a shortcut command given an argument;
   - slog's default during the run, and restored after a clean run and after a startup failure;
   - a crash printing nothing and exiting 1, `cli.Exit(3, …)` exiting 3, a startup failure printing nothing, and an unknown flag still printed.
 
-## 8. kernel docs
+## 9. kernel docs
 
-- [ ] 8.1 Write `kernel/README.md` in the constitution's order:
+- [ ] 9.1 Write `kernel/README.md` in the constitution's order:
   - overview;
   - Configuration: none, with `Options` as developer settings and the flags as per-run choices;
   - Exported Members: every export, with the `Options` fields and the `App` methods;
   - Usage: a `main` with `cli.Main`, `RootCommand`, a shortcut command, a command with an argument through `Run`, config through `Shared`, and the kernel owning `configloader.WithFilename`;
   - how failures are reported.
   - No backticks in table cells.
-- [ ] 8.2 In the root `README.md`, add the `kernel` row to the Modules table in alphabetical order.
+- [ ] 9.2 In the root `README.md`, add the `kernel` row to the Modules table in alphabetical order.
 
-## 9. kernel verification
+## 10. kernel verification
 
-- [ ] 9.1 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
-- [ ] 9.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 9.1 and 9.2.
+- [ ] 10.1 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
+- [ ] 10.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 10.1 and 10.2.

@@ -54,7 +54,7 @@ When any runner returns, for any reason, the module SHALL cancel every other run
 
 ### Requirement: Each runner's outcome is clean or a crash
 
-A runner returning nil SHALL count as clean. A runner returning an error matching `context.Canceled` SHALL count as clean only if the runners' context had been cancelled when it returned. Any other error SHALL count as a crash, and the error returned for it SHALL name the runner and wrap the runner's error. The result SHALL be nil when every outcome is clean, and every crash error joined otherwise.
+A runner returning nil SHALL count as clean. A runner returning its context's own error SHALL count as clean once that context is done, whether the first return or the caller cancelled it or the caller's deadline passed. The same error returned while the context is live, and any other error, SHALL count as a crash, and the error returned for it SHALL name the runner and wrap the runner's error. The result SHALL be nil when every outcome is clean, and every crash error joined otherwise.
 
 #### Scenario: Everything clean
 - **WHEN** one runner returns nil and the others return `context.Canceled` after being cancelled
@@ -68,21 +68,33 @@ A runner returning nil SHALL count as clean. A runner returning an error matchin
 - **WHEN** a runner returns `context.Canceled` while the runners' context is still live
 - **THEN** it counts as a crash
 
+#### Scenario: The caller's deadline
+- **WHEN** the caller's context has a deadline and every runner returns its context's error once the deadline passes
+- **THEN** the result is nil
+
+#### Scenario: An early deadline error
+- **WHEN** a runner returns `context.DeadlineExceeded` while the runners' context is still live
+- **THEN** it counts as a crash
+
 #### Scenario: An exit code survives
 - **WHEN** a runner returns an error wrapping a value of an error type the caller defines
 - **THEN** the result exposes that value through `errors.As`
 
 ### Requirement: A panicking runner is a crash, and the app still stops cleanly
 
-A panic in a runner SHALL be recovered and counted as that runner's crash, with an error naming the runner and the panic's value. The other runners SHALL be stopped and the OnStop hooks SHALL run, as for any crash.
+A panic in a runner SHALL be recovered and counted as that runner's crash, with an error naming the runner and the panic's value. A runner that exits without returning, through `runtime.Goexit`, SHALL count as a crash the same way. The other runners SHALL be stopped and the OnStop hooks SHALL run, as for any crash.
 
 #### Scenario: A panic
 - **WHEN** the runner `worker` panics with the value `boom` while another runner waits on its context
 - **THEN** the other runner is cancelled, the OnStop hooks run, and the result names `worker` and `boom`
 
+#### Scenario: An exit through Goexit
+- **WHEN** the runner `worker` calls `runtime.Goexit` while another runner waits on its context
+- **THEN** the other runner is cancelled, the OnStop hooks run, and the result names `worker` as having exited without returning
+
 ### Requirement: Startup is bounded, and its failures are reported by their cause
 
-The OnStart hooks SHALL run under a start timeout, 15 seconds unless the caller sets another. A failure while building the app or starting it SHALL be returned as the failing function's own error, without the dependency-injection layers around it. A panic in a constructor or an invoked function SHALL be such a failure, not a crash of the process. If the caller's context is cancelled during start, the result SHALL be nil.
+The OnStart hooks SHALL run under a start timeout, 15 seconds unless the caller sets another. A failure while building the app or starting it SHALL be returned as the failing function's own error, without the dependency-injection layers around it, and a build failure SHALL read differently from a hook failure. A panic in a constructor or an invoked function SHALL be such a failure, not a crash of the process. If the start fails because the caller's context ended, cancelled or past its deadline, the result SHALL be nil; a start failure with any other cause SHALL be returned, even if the caller's context has ended since.
 
 #### Scenario: A failing constructor
 - **WHEN** a constructor returns the error `validating config: port required`
@@ -96,13 +108,25 @@ The OnStart hooks SHALL run under a start timeout, 15 seconds unless the caller 
 - **WHEN** an OnStart hook waits on its context and the start timeout is 50 milliseconds
 - **THEN** running the app fails once the timeout has passed, and no runner starts
 
+#### Scenario: A failing hook
+- **WHEN** an OnStart hook returns the error `bind: address already in use`
+- **THEN** running the app fails with an error ending in that message, which reads differently from a failing constructor's
+
 #### Scenario: Cancelled during start
 - **WHEN** the caller's context is cancelled while an OnStart hook waits on its context
 - **THEN** the result is nil, and no runner starts
 
+#### Scenario: The caller's deadline during start
+- **WHEN** the caller's context reaches its deadline while an OnStart hook waits on its context, with a longer start timeout
+- **THEN** the result is nil, and no runner starts
+
+#### Scenario: Another failure after the caller ends
+- **WHEN** a start fails with an error that isn't the caller's context's ending, and the caller's context has ended by the time the failure is judged
+- **THEN** running the app fails with that error
+
 ### Requirement: OnStop hooks see the run's outcome on a live context
 
-The OnStop hooks SHALL run under a stop timeout, 15 seconds unless the caller sets another, on a context that keeps the caller's values but isn't cancelled by the caller's cancellation. That context SHALL carry the run's outcome: nil when every runner was clean, and the joined crash errors otherwise. A failing OnStop hook SHALL add its error to the result, joined with any crash.
+The OnStop hooks SHALL run under a stop timeout, 15 seconds unless the caller sets another, on a context that keeps the caller's values but isn't cancelled by the caller's cancellation. That context SHALL carry the run's outcome: nil when every runner was clean, and the joined crash errors otherwise. A failing OnStop hook SHALL add its error to the result, joined with any crash. OnStop hooks run to roll back a failed start SHALL read a not-started outcome, never nil.
 
 #### Scenario: A clean outcome
 - **WHEN** every runner was clean and an OnStop hook reads the run's outcome from its context
@@ -119,6 +143,10 @@ The OnStop hooks SHALL run under a stop timeout, 15 seconds unless the caller se
 #### Scenario: A failing hook
 - **WHEN** a runner crashed and an OnStop hook returns an error
 - **THEN** the result matches both errors with `errors.Is`
+
+#### Scenario: A rolled-back start
+- **WHEN** a hook with an OnStop has started and a later OnStart hook fails
+- **THEN** the first hook's OnStop reads an outcome matching the module's not-started error
 
 #### Scenario: Attached by a test
 - **WHEN** a test attaches an error to a context and reads the run's outcome back from it

@@ -7,11 +7,11 @@
 - New module `kernelrun` (`github.com/sikhlana/pkg/kernelrun`), starting at 0.1.0. It runs an fx app's runners between its start and stop:
   - **Runners.** Modules and apps register named runners into an fx group, as a constructor or a value. A runner is a `func(ctx) error`.
   - **The first runner to return stops the rest.** Its siblings' context is cancelled and `Run` waits for them all. A runner that ignores cancellation is left to the caller's second signal.
-  - **Clean or crash.** A runner returning nil is clean, and so is one returning `context.Canceled` once the app's context had been cancelled. Anything else, including a recovered panic, is a crash, named after its runner, and the app still shuts down cleanly.
+  - **Clean or crash.** A runner returning nil is clean, and so is one returning its context's own error once that context is done: cancelled, or past the caller's deadline. Anything else, including a recovered panic or an exit through `runtime.Goexit`, is a crash, named after its runner, and the app still shuts down cleanly.
   - **Checked before start.** No runners, a duplicate name, an empty name or a nil function fails with an exported sentinel before any hook starts.
-  - **Start.** A start timeout bounds the OnStart hooks. A panicking constructor or invoke becomes an error. A startup failure is reported as its root cause, without dig's scaffolding. A cancellation of the caller's context during start is a clean exit.
+  - **Start.** A start timeout bounds the OnStart hooks. A panicking constructor or invoke becomes an error. A build or startup failure is reported as its root cause, without dig's scaffolding. A start cut short by the caller's context ending is a clean exit; any other start failure is reported.
   - **Stop.** A stop timeout bounds the OnStop hooks, on a context detached from the caller's cancellation that keeps its values. The run's outcome rides on it.
-  - **`kernelrun/runerr`.** OnStop hooks read the run's outcome with `runerr.From`, and tests attach one with `runerr.With`. It imports nothing but `context`.
+  - **`kernelrun/runerr`.** OnStop hooks read the run's outcome with `runerr.From`, and tests attach one with `runerr.With`. Hooks rolled back after a failed start read `runerr.ErrNotStarted`, never a clean nil. It imports only the standard library.
   - **Signals.** `Run` never subscribes to OS signals; the caller's context is the only way one reaches it, so `cli`'s second Ctrl-C still ends the process.
   - **Logging.** Run and stop failures are logged at Error, and the lifecycle at Debug, through the graph's `*slog.Logger` when there is one.
 - New module `kernel` (`github.com/sikhlana/pkg/kernel`), starting at 0.1.0 once `kernelrun` is published. It turns cobra commands into apps:
@@ -25,7 +25,7 @@
   - The first return stops everything, where errgroup only stopped on an error.
   - `WithVerbose` goes: the log level decides what fx's events show, and a startup error is always its root cause, since the event logger logs the full chain.
   - New: recovered panics, the start timeout, clean exits on cancellation during start, the checks before start, the context-preserving stop, and the wiring with `cli`, `log` and `configloader`.
-  - `Canceled` counts as clean only when the app's context was cancelled, not whenever a runner returns it.
+  - A runner's `Canceled` or `DeadlineExceeded` counts as clean only once its context is actually done, not whenever a runner returns it.
   - The `runerr` package keeps `With` and `From`, under `kernelrun`.
 - Constitution:
   - **The run-loop rule names `kernelrun`.** A loop module's `ProvideRunner` registers through `kernelrun.ProvideRunner`. The module prepares in OnStart (binding a listener, say), serves in the runner and cleans up in OnStop, so a setup failure is a startup failure and a finished `Start` means ready.

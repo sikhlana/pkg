@@ -13,8 +13,8 @@ const RunnerGroup = `group:"kernelrun:runner"`
 // builtParams carries the same tag.
 const builtRunner = `name:"kernelrun:runner:built"`
 
-// Func is a runner's body. It runs until its work is done or ctx is cancelled, and its return, whatever it returns,
-// stops the app. Returning nil, or ctx's error once ctx is cancelled, is a clean exit; any other error is a crash.
+// Func is a runner's body. It runs until its work is done or ctx is done, and its return, whatever it returns, stops
+// the app. Returning nil, or ctx's error once ctx is done, is a clean exit; any other error is a crash.
 type Func func(ctx context.Context) error
 
 // Runner is a named Func, as Run collects it from RunnerGroup. The name identifies the runner in errors and logs, so

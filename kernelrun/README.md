@@ -16,7 +16,7 @@ None. The start and stop timeouts are developer settings, passed to `Run` in `Op
 | Options.StopTimeout | Bounds the OnStop hooks. Zero means DefaultStopTimeout. |
 | DefaultStartTimeout | 15 seconds, fx's own default. |
 | DefaultStopTimeout | 15 seconds, fx's own default. |
-| Func | A runner's body. It runs until its work is done or its context is cancelled. Returning nil, or context.Canceled once cancelled, is clean; anything else is a crash. |
+| Func | A runner's body. It runs until its work is done or its context is done. Returning nil, or its context's error once that context is done, is clean; anything else is a crash. |
 | Runner | A named Func, the element type of RunnerGroup. |
 | Runner.Name | Identifies the runner in errors and logs. Non-empty and unique within an app. |
 | Runner.Func | The runner's body. Never nil. |
@@ -27,7 +27,8 @@ None. The start and stop timeouts are developer settings, passed to `Run` in `Op
 | ErrDuplicateRunner | Returned by Run, before any OnStart hook, for two runners with one name. |
 | ErrInvalidRunner | Returned by Run, before any OnStart hook, for a runner with an empty name or a nil Func. |
 | runerr.With | Returns a copy of a context carrying an error as the run's outcome. For tests of OnStop hooks. |
-| runerr.From | Returns the run's outcome from a context: nil after a clean run or when none is attached, the joined crash errors after a crash. |
+| runerr.From | Returns the run's outcome from a context: nil after a clean run or when none is attached, the joined crash errors after a crash, and ErrNotStarted while fx rolls back a failed start. |
+| runerr.ErrNotStarted | The outcome an OnStop hook reads while fx rolls back a start that failed, when no runner ran. |
 
 ## Usage
 
@@ -66,10 +67,10 @@ How a run goes:
 
 - **Checked before start.** No runners, a repeated name, an empty name or a nil `Func` fails with `ErrNoRunners`, `ErrDuplicateRunner` or `ErrInvalidRunner` before any OnStart hook runs.
 - **Started, then run.** The OnStart hooks run under the start timeout, then every runner starts in its own goroutine, on a context carrying the caller's values.
-- **The first return stops the rest,** whatever it returns, and so does the caller's cancellation. `Run` waits for every runner. One that ignores its context keeps `Run` waiting; `cli.SignalContext` hands the second Ctrl-C back to the operating system, which ends the process.
-- **Clean or crash.** nil is clean, and so is `context.Canceled` once the runner's context was cancelled. Anything else is a crash, `running <name>: <error>`, and a panic is recovered into one, `running <name>: panic: <value>`. The app still stops through its OnStop hooks.
+- **The first return stops the rest,** whatever it returns, and so does the caller's context ending. `Run` waits for every runner. One that ignores its context keeps `Run` waiting; `cli.SignalContext` hands the second Ctrl-C back to the operating system, which ends the process.
+- **Clean or crash.** nil is clean, and so is the runner's context's own error once that context is done: cancelled by the first return or the caller, or past the caller's deadline. Anything else is a crash, `running <name>: <error>`. A panic is recovered into one, `running <name>: panic: <value>`, and a runner that exits through `runtime.Goexit` is one, `running <name>: exited without returning`. The app still stops through its OnStop hooks.
 - **Stopped.** The OnStop hooks run under the stop timeout, on a context that keeps the caller's values without its cancellation.
-- **Startup failures** are returned as their root cause, `starting the app: <error>`, without fx's and dig's wrapping. A panicking constructor or invoke is one. If the caller's context is cancelled during start, `Run` returns nil.
+- **Startup failures** are returned as their root cause, without fx's and dig's wrapping: `building the app: <error>` for a constructor or invoke, a panicking one included, and `starting the app: <error>` for an OnStart hook. A start that fails because the caller's context ended, cancelled or past its deadline, is a clean exit and `Run` returns nil. Any other start failure is returned, even if the context has ended since.
 - **Errors keep their chains,** so a runner returning `cli.Exit(3, err)` still exits 3 through `cli.Execute`.
 
 `Run` never subscribes to SIGINT or SIGTERM: the context is the only way a signal reaches the app.
@@ -97,7 +98,13 @@ func ProvideRunner() fx.Option {
 func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
-		_ = s.srv.Shutdown(context.WithoutCancel(ctx))
+
+		// Bounded: Run waits for every runner before the stop timeout applies, so an unbounded Shutdown would wait
+		// on a connection that never goes idle.
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+
+		_ = s.srv.Shutdown(shutdownCtx)
 	}()
 
 	if err := s.srv.Serve(s.listener); !errors.Is(err, http.ErrServerClosed) {
@@ -118,7 +125,7 @@ kernelrun.ProvideRunner("import", func(p ImportParams) kernelrun.Func {
 })
 ```
 
-An OnStop hook reads the run's outcome with `runerr.From`, to flush differently after a crash, say. Tests hand a hook an outcome with `runerr.With`:
+An OnStop hook reads the run's outcome with `runerr.From`, to flush differently after a crash, say. When fx rolls back a failed start, the hooks it stops read `runerr.ErrNotStarted`, so a hook taking the clean path only on nil never mistakes a failed start for a clean run. Tests hand a hook an outcome with `runerr.With`:
 
 ```go
 lc.Append(fx.Hook{

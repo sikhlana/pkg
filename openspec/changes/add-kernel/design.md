@@ -87,6 +87,8 @@ var (
 ```go
 package runerr
 
+var ErrNotStarted = errors.New("the app didn't start")
+
 func With(ctx context.Context, err error) context.Context
 func From(ctx context.Context) error
 ```
@@ -101,11 +103,11 @@ func From(ctx context.Context) error
 
 ```
 fx.New(RecoverFromPanics, opts…, collect runners and the optional logger)
-  │  failure ─▶ "starting the app: <root cause>"
+  │  failure ─▶ "building the app: <root cause>"
 check runners ─▶ ErrNoRunners · ErrDuplicateRunner · ErrInvalidRunner
   │
-Start(ctx + start timeout)
-  │  failure, ctx cancelled ─▶ nil (clean)        failure otherwise ─▶ "starting the app: <root cause>"
+Start(ctx + start timeout, runerr.With(ErrNotStarted))
+  │  failure that is ctx's own ending ─▶ nil (clean)        any other failure ─▶ "starting the app: <root cause>"
 runners, each in a goroutine, on a context cancelled when the first returns
   │  first return ─▶ cancel the rest ─▶ wait for all
 Stop(WithoutCancel(ctx) + stop timeout, runerr.With(outcome))
@@ -117,13 +119,15 @@ return the joined crash and stop errors, or nil
 - **The first return stops everything.** errgroup cancels only on an error, so a server that exits cleanly but unexpectedly would leave the rest running. Here the first runner to return, whatever it returns, cancels its siblings' context with a cause naming it, and `Run` waits for all of them. A runner that ignores cancellation is left to the caller's second signal, which `cli` turns into the operating system's default action.
 - **Clean or crash, per runner:**
   - nil is clean;
-  - `context.Canceled` is clean when the runners' context was already cancelled as it returned, by the caller or by the first return;
-  - anything else is a crash, wrapped as `running <name>: %w`.
+  - the runners' context's own error is clean once that context is done, whether the first return or the caller cancelled it or the caller's deadline passed (`errors.Is(err, runCtx.Err())`);
+  - anything else is a crash, wrapped as `running <name>: %w`, including that same error returned while the context is still live.
 
-  go-modules treated any `context.Canceled` as clean, which hid a runner that returned an internal cancellation while the app was healthy.
+  go-modules treated any `context.Canceled` as clean, which hid a runner that returned an internal cancellation while the app was healthy. The first implementation here matched only `context.Canceled`, so a runner returning `ctx.Err()` at the caller's deadline was a crash. Review settled that a deadline on the caller's context is a planned stop: the caller chose it, and can check `ctx.Err()` after `Run` if it cares.
 - **A runner's panic is recovered** into a crash, `running <name>: panic: <value>`, with the stack logged at Error. The app then stops like any crash, so OnStop hooks still drain and flush. The process still fails, after a clean shutdown.
-- **A startup error is its root cause** (`dig.RootCause`), prefixed `starting the app:`. go-modules kept the full chain under `--verbose`; here `log.NewEventLogger` already logs the full chain at Error in every mode, so the returned error doesn't depend on a flag.
-- **A cancelled start is clean.** If `Start` fails after the caller's context was cancelled, `Run` returns nil, matching the run phase's rule. fx rolls back with that cancelled context. That's harmless when loop modules follow the lifecycle rule (decision 8), since nothing serves before the runners start.
+- **A runner that exits through `runtime.Goexit` is a crash too,** `running <name>: exited without returning`. Classification and the cancellation of the others run in a `defer`, so a `Goexit` (a stray `t.FailNow` in a test, say) still stops the run instead of leaving the rest running.
+- **A startup error is its root cause** (`dig.RootCause`), prefixed `building the app:` for a constructor or invoke and `starting the app:` for an OnStart hook, so a missing dependency reads differently from a hook failure. go-modules kept the full chain under `--verbose`; here `log.NewEventLogger` already logs the full chain at Error in every mode, so the returned error doesn't depend on a flag.
+- **A start cut short by the caller's context is clean.** If `Start` fails with the caller's context's own error, cancelled or past its deadline, `Run` returns nil, matching the run phase's rule. Any other start failure is returned, even if the context has ended since; the first implementation swallowed every start failure once the context was done. fx's own `withTimeout` returns the context's error whenever the context is done as a hook returns, so a hook failure exactly concurrent with a signal reads as the signal; the check closes the window after fx returns.
+- **A failed start's rollback reads `runerr.ErrNotStarted`.** fx rolls back with the start context, so `Run` attaches the sentinel to it from the beginning. OnStop hooks only see that context during a rollback, so a hook taking the clean path only on nil never mistakes a failed start for a clean run. OnStart hooks could read it too, but have no reason to. The rollback context may still be cancelled or past its deadline, which is harmless when loop modules follow the lifecycle rule (decision 8), since nothing serves before the runners start.
 - **The stop context is `context.WithoutCancel(ctx)` with the stop timeout,** so OnStop hooks keep the run context's values (trace and request scope, say) without its cancellation. go-modules used `context.Background()`. `runerr.With` attaches the joined crash errors, or nil on a clean exit.
 - **`Run` returns `errors.Join` of the crash errors and `stopping the app: %w`.** Errors keep their chains, so a runner returning `cli.Exit(3, err)` still exits 3 through `cli.Execute`.
 
@@ -266,7 +270,8 @@ No errgroup: the first-return semantics need a cancel-on-any-return that errgrou
 
 - [A runner that ignores cancellation keeps `Run` waiting] → The caller's second signal ends the process; documented.
 - [A panic in a lifecycle hook still crashes the process] → `RecoverFromPanics` covers only constructors, decorators and invokes, and fx runs the hooks. Hooks should do little and return errors.
-- [A cancelled start rolls back with a cancelled context] → Harmless under the lifecycle rule, since nothing serves before the runners. Documented for hooks that need time to release what OnStart took.
+- [A cancelled or timed-out start rolls back with a dead context] → Harmless under the lifecycle rule, since nothing serves before the runners, and the rolled-back hooks read `runerr.ErrNotStarted`. Documented for hooks that need time to release what OnStart took.
+- [Run waits for runners without a bound, so a runner whose own shutdown is unbounded hangs the app] → The README's server example bounds its `Shutdown`, and the caller's second signal remains the way out.
 - [`fx.Shutdowner` is unheard in apps outside this repo, where the lint ban doesn't apply] → The `kernelrun` README says so and points at runners.
 - [Every app importing `kernel` builds viper, even one that never loads config] → Accepted: `cli` already gives every program `--config`, and the alternatives push the loader's wiring back onto every app.
 - [Saving and restoring slog's default could trip sloglint's no-global check] → It's process setup, not logging. If sloglint reports it, a scoped `nolint` with the reason.

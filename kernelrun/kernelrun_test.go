@@ -3,6 +3,7 @@ package kernelrun_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -177,6 +178,28 @@ func TestOutcome(t *testing.T) {
 		assert.EqualError(t, err, "running api: context canceled")
 	})
 
+	t.Run("the caller's deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		err := runContext(ctx, kernelrun.Options{},
+			kernelrun.WithRunner("ticker", waitDone),
+			kernelrun.WithRunner("worker", waitDone),
+		)
+
+		assert.NoError(t, err)
+	})
+
+	t.Run("an early deadline error", func(t *testing.T) {
+		err := run(t, kernelrun.Options{},
+			kernelrun.WithRunner("api", func(context.Context) error { return context.DeadlineExceeded }),
+			kernelrun.WithRunner("worker", waitDone),
+		)
+
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.EqualError(t, err, "running api: context deadline exceeded")
+	})
+
 	t.Run("an exit code survives", func(t *testing.T) {
 		err := run(t, kernelrun.Options{}, kernelrun.WithRunner("api", func(context.Context) error {
 			return &codeError{code: 3}
@@ -217,6 +240,33 @@ func TestPanickingRunner(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "worker", crashed.Attrs["runner"])
 	assert.Contains(t, crashed.Attrs["stack"], "kernelrun_test.TestPanickingRunner")
+}
+
+func TestRunnerExitingThroughGoexit(t *testing.T) {
+	var waiterCancelled, stopped bool
+
+	err := run(t, kernelrun.Options{},
+		hooks(nil, func(context.Context) error {
+			stopped = true
+
+			return nil
+		}),
+		kernelrun.WithRunner("worker", func(context.Context) error {
+			runtime.Goexit()
+
+			return nil
+		}),
+		kernelrun.WithRunner("other", func(ctx context.Context) error {
+			err := waitDone(ctx)
+			waiterCancelled = true
+
+			return err
+		}),
+	)
+
+	require.EqualError(t, err, "running worker: exited without returning")
+	assert.True(t, waiterCancelled, "the other runner was stopped")
+	assert.True(t, stopped)
 }
 
 func TestChecksBeforeStart(t *testing.T) {
@@ -278,7 +328,16 @@ func TestConstructorErrorIsTheRootCause(t *testing.T) {
 		kernelrun.ProvideRunner("api", func(config) kernelrun.Func { return returnNil }),
 	)
 
-	require.EqualError(t, err, "starting the app: validating config: port required")
+	require.EqualError(t, err, "building the app: validating config: port required")
+}
+
+func TestHookFailureIsAStartFailure(t *testing.T) {
+	err := run(t, kernelrun.Options{},
+		hooks(func(context.Context) error { return errors.New("bind: address already in use") }, nil),
+		kernelrun.WithRunner("api", returnNil),
+	)
+
+	require.EqualError(t, err, "starting the app: bind: address already in use")
 }
 
 func TestRecoverFromPanicsTurnsAConstructorPanicIntoAnError(t *testing.T) {
@@ -289,7 +348,7 @@ func TestRecoverFromPanicsTurnsAConstructorPanicIntoAnError(t *testing.T) {
 		kernelrun.ProvideRunner("api", func(config) kernelrun.Func { return returnNil }),
 	)
 
-	require.ErrorContains(t, err, "starting the app: ")
+	require.ErrorContains(t, err, "building the app: ")
 	assert.ErrorContains(t, err, "boom")
 }
 
@@ -333,6 +392,72 @@ func TestCancelledDuringStartIsClean(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.False(t, ran, "a runner started")
+}
+
+func TestCallersDeadlineDuringStartIsClean(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	var ran bool
+
+	err := runContext(ctx, kernelrun.Options{StartTimeout: time.Minute},
+		hooks(waitDone, nil),
+		kernelrun.WithRunner("api", func(context.Context) error {
+			ran = true
+
+			return nil
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.False(t, ran, "a runner started")
+}
+
+func TestEndedBy(t *testing.T) {
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	expired, cancelExpired := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancelExpired()
+
+	bind := errors.New("bind: address already in use")
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{name: "cancelled, its error", ctx: cancelled, err: context.Canceled, want: true},
+		{name: "cancelled, its error wrapped", ctx: cancelled, err: errors.Join(bind, context.Canceled), want: true},
+		{name: "cancelled, another error", ctx: cancelled, err: bind},
+		{name: "expired, its error", ctx: expired, err: context.DeadlineExceeded, want: true},
+		{name: "expired, a cancellation", ctx: expired, err: context.Canceled},
+		{name: "live, a cancellation", ctx: t.Context(), err: context.Canceled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, kernelrun.EndedBy(tt.ctx, tt.err))
+		})
+	}
+}
+
+func TestRollbackReadsNotStarted(t *testing.T) {
+	var outcome error
+
+	err := run(t, kernelrun.Options{},
+		hooks(nil, func(ctx context.Context) error {
+			outcome = runerr.From(ctx)
+
+			return nil
+		}),
+		hooks(func(context.Context) error { return errors.New("bind: address already in use") }, nil),
+		kernelrun.WithRunner("api", returnNil),
+	)
+
+	require.EqualError(t, err, "starting the app: bind: address already in use")
+	assert.ErrorIs(t, outcome, runerr.ErrNotStarted, "the rolled-back hook's outcome")
 }
 
 func TestStopContextOutcome(t *testing.T) {

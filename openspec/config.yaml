@@ -305,6 +305,15 @@ rules:
     - Then a task running go test -short ./... across every module. If
       it fails, fix and repeat both verification steps until it
       passes.
+    - >
+      Tasks are the work done on the branch before review: code, tests,
+      docs and the verification chain. Steps outside the branch aren't
+      tasks: opening or merging the pull request, watching CI, checking
+      a published release, consumer checks after merge, and repository
+      settings. CI and the release tooling enforce most of them, and an
+      unticked one would hold the change back from archiving. Note any
+      that need saying in design.md's Migration Plan. When a task has
+      to wait for one, such as a sibling's release, say so in the task.
   specs:
     - Use SHALL/MUST/MAY (RFC 2119) for normative requirements.
     - Each requirement has at least one scenario, headed with exactly

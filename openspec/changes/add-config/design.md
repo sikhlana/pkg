@@ -297,6 +297,8 @@ Nothing in this repo uses either module yet, so nothing migrates.
 1. **First PR:** `config/configvalidator` at 0.1.0, the constitution edits, its README row and `use ./config/configvalidator` in `go.work`. Merging publishes `config/configvalidator/v0.1.0`.
 2. **Second PR:** `config/configloader` at 0.1.0, requiring `config/configvalidator v0.1.0`, plus its README row, `use ./config/configloader` and `docs/config.md`. CI builds it with `GOWORK=off` against the published `config/configvalidator`. This is the first real test of the dependency-tier rule.
 
+Each pull request's title and body are drafted for approval before it's opened. After each merge, publish should create the module's tag and GitHub release, and the module should resolve through proxy.golang.org with `GOWORK=off`. These are checks on CI and the release tooling, not tasks, so they don't hold the change back from archiving.
+
 Rollback means fixing forward: 0.1.1, or 0.2.0 for an API fix, plus a `retract` directive if a published version is unusable.
 
 ## Open Questions
@@ -313,9 +315,11 @@ What changed while applying the first pull request, and why.
 - **The tag-pass translation follows values, not types** (decision 2), for interface fields and map entries whose names contain brackets or dots.
 - **The walk descends interface values** (decision 3, rule 5), copying their contents like map values, to match go-playground's tag pass. The spec now lists interface values in both requirements.
 - **Fixed in review:** `Validate` on a `T` of interface type panicked in the tag pass, which took the address of a value it had reached through the interface. The tag pass now hands go-playground the struct value. `ValidateField` couldn't find a field behind an interface field holding a pointer; it now looks through interfaces as the walk does.
-- **`plan` selects every module, not just the new one.** Tasks 8.1 and 18.1 expected `plan` to print only the new module, but registering it changes `go.work`, which selects every module for lint and test (release-ci spec). `check` still covers only the new module. The tasks were corrected.
+- **`plan` selects every module, not just the new one.** Tasks 8.1 and 18.1 (since dropped, below) expected `plan` to print only the new module, but registering it changes `go.work`, which selects every module for lint and test (release-ci spec). `check` still covers only the new module. The tasks were corrected.
 - **`Errors` replaced `errors.Join`** at the user's request, after the first draft of the pull request. Validate and ValidateField return it for any number of violations, which also settles the open question of a helper to list them. The constitution's receiver rule gained an exception for slice error types.
 - **Open for the second pull request: `,remain`.** The loader must recognise a `,remain` field, which takes no env names and makes its level accept any key. The shared key rules don't cover it, so either the loader reads that tag option itself, or `config/configvalidator` gains a helper, which after `v0.1.0` means a 0.2.0 release first.
+
+- **Release steps left the task list.** Sections 8 and 18 (local `plan` and `check`, opening each pull request, the published release and a consumer check) were dropped, and the sections after 8 renumbered. A new constitution rule keeps steps outside the branch out of task lists, since an unticked one would hold the change back from archiving. The Migration Plan keeps the checks worth making.
 
 ## Fixes from code review
 

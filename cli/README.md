@@ -4,7 +4,7 @@ Cobra scaffolding for a program's `main`: a context that a signal cancels, exit 
 
 ## Configuration
 
-None. `cli` runs in `main`, before any configuration is loaded. The root command's `--config` flag only carries a path, for the program to load however it likes.
+None. `cli` runs in `main`, before any configuration is loaded.
 
 ## Exported Members
 
@@ -24,9 +24,8 @@ None. `cli` runs in `main`, before any configuration is loaded. The root command
 | ExitError.Error | Returns the underlying error's message, or exit status N, the code the process exits with, when Err is nil. |
 | ExitError.Unwrap | Returns the underlying error. |
 | Exit | Returns an error, always an ExitError, with a code and an underlying error, which may be nil. |
-| NewRootCommand | Returns a root command with a persistent --config flag (no shorthand), a --version flag, and no usage text on errors. |
+| NewRootCommand | Returns a root command with no flags of its own beyond cobra's --help and --version, and no usage text on errors. |
 | NewVersionCommand | Returns a version subcommand that prints the root's name and Version, the same line as --version. |
-| ConfigFlag | The name of the config flag, for reading it with cmd.Flags().GetString. |
 | Version | The version, set at link time. Empty unless the build sets it. |
 | Revision | The version-control revision, set at link time. Empty unless the build sets it. |
 | Time | The time of the revision, set at link time. Empty unless the build sets it. |
@@ -71,12 +70,7 @@ func newServeCommand() *cobra.Command {
 		Use:   "serve",
 		Short: "Serve requests",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path, err := cmd.Flags().GetString(cli.ConfigFlag)
-			if err != nil {
-				return fmt.Errorf("reading the config flag: %w", err)
-			}
-
-			fmt.Fprintln(cmd.OutOrStdout(), "serving with", path)
+			fmt.Fprintln(cmd.OutOrStdout(), "serving")
 
 			<-cmd.Context().Done()
 

@@ -82,7 +82,7 @@ The rejection's error is unexported. It's an operator error that cobra prints, n
 
 ### 4. cli deletes ConfigFlag rather than deprecating it
 
-A deprecated constant naming a flag the root no longer defines would turn every `GetString(cli.ConfigFlag)` into a runtime error. Deleting it turns it into a compile error, which is what a pre-1.0 breaking change should be. The `cli` spec's `--config` requirement goes. Its other promise, that the root claims no single-letter shorthand, becomes a requirement of its own with the `-c` scenario.
+A deprecated constant naming a flag the root no longer defines would turn every `GetString(cli.ConfigFlag)` into a runtime error. Deleting it turns it into a compile error, which is what a pre-1.0 breaking change should be. The `cli` spec's `--config` requirement goes. Its other promise becomes a requirement of its own with the `-c` scenario: the root adds no flags of its own, and no letters, beyond cobra's `--help` (`-h`) and `--version` (`-v`, which cobra drops when another flag takes `v`). Review caught the first wording, "claims no single-letter shorthand", which cobra's `-h` makes false.
 
 ### 5. Three pull requests, one module each
 

@@ -7,13 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ConfigFlag is the name of the persistent config-file flag NewRootCommand adds, --config. Any command under that
-// root reads it with cmd.Flags().GetString(cli.ConfigFlag).
-const ConfigFlag = "config"
-
-// NewRootCommand returns a root command with the given name and short description. Every command under it accepts
-// a --config string flag, empty by default. The flag has no shorthand, so every letter stays free for subcommands. A
-// failing command prints its error but never the usage text, flag errors included; --help still prints help.
+// NewRootCommand returns a root command with the given name and short description. It adds no flags of its own:
+// beyond cobra's --help (-h) and --version (-v, which cobra drops when another flag takes v), every flag name and
+// letter stays free for the program. A failing command prints its error but never the usage text, flag errors
+// included; --help still prints help.
 // --version prints the root's display name and its Version, which starts as the ReadBuildInfo line.
 func NewRootCommand(name, short string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -23,7 +20,6 @@ func NewRootCommand(name, short string) *cobra.Command {
 		SilenceUsage: true,
 	}
 
-	cmd.PersistentFlags().String(ConfigFlag, "", "path to the config file")
 	cmd.SetVersionTemplate("{{.DisplayName}} {{.Version}}\n")
 
 	return cmd

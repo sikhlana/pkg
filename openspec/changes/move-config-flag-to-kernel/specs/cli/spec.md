@@ -7,9 +7,9 @@
 
 ## ADDED Requirements
 
-### Requirement: The root claims no single-letter shorthand
+### Requirement: The root adds no flags of its own
 
-A root command built by the module SHALL NOT claim any single-letter shorthand on the program's commands, and SHALL carry no flag beyond `--version` and help.
+A root command built by the module SHALL add no flags of its own beyond cobra's help and version flags, and SHALL claim no single-letter shorthand beyond cobra's: `-h` for help, and `-v` for `--version` only while no other flag takes it. Every other flag name and letter SHALL stay free for the program's commands.
 
 #### Scenario: Subcommand uses -c
 - **WHEN** a subcommand defines its own flag with shorthand `-c` and a program runs it with `-c 4`

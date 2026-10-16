@@ -1,6 +1,6 @@
 # release
 
-The repository's release CI. Pull requests run `plan` and `check`; every push to `main` runs `publish`. It's repo tooling under `tools/`, so it sits outside `go.work`, runs with `GOWORK=off`, has no `VERSION` and is never released.
+The repository's release CI. Pull requests run `plan` and `check`; every push to `main` runs `publish`. It's repo tooling under `tools/`, so it sits outside `go.work`, runs with `GOWORK=off`, has no `VERSION` and is never released. [docs/release.md](../../docs/release.md) explains why it's shaped this way.
 
 ## Commands
 

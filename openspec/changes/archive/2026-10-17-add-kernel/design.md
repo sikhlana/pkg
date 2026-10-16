@@ -9,7 +9,9 @@ Facts that shape the approach, checked against sources:
 - **A failed `Start` rolls back with the context it was given** (`app.go:684`), so hooks stopped during a rollback see a context that may already be cancelled or past its deadline.
 - **`fx.RecoverFromPanics` covers functions given to `Provide`, `Decorate` and `Invoke`,** not lifecycle hooks, and is rejected inside an `fx.Module`.
 - **cobra stores flag-group annotations on the `*pflag.Flag`** (`flag_groups.go:73`), and subcommands inherit the root's persistent flags as the same flag, so a mutually exclusive group set on the root applies to every command.
-- **pflag v1.0.9 has `TextVar` and `GetText`,** so `--format` parses into `log.Format` and is read back without string handling.
+- **pflag v1.0.9 has `TextVar` and `GetText`,** so `--format` parses into `log.Format` and is read back without string handling. Its `TextVar` reports the empty name of a pointer type as the flag's type (`text.go:47`), so help shows no value placeholder unless the usage backquotes one.
+- **fx runs a module's invokes before its parent's own,** each child in the order it was listed (`module.go:313`), so a root-level invoke runs after every module's.
+- **Once slog's default is replaced, the log package writes into its handler at slog's bridge level,** Info unless `slog.SetLogLoggerLevel` says otherwise.
 - **cobra prints a returned error unless the executing command sets `SilenceErrors`,** which `cli`'s quiet-exit example already relies on.
 - **`log.NewEventLogger` logs fx's failures at Error in every mode,** with the full error chain.
 
@@ -196,6 +198,7 @@ root.AddCommand(
 ```
 
 - **`App` is a small immutable value,** so it's returned and received by value. It holds developer settings, not fx values, because the flag defaults are needed before any graph exists.
+- **`New` panics on an invalid `Options.Format`,** with an error matching `log.ErrUnknownFormat`. pflag swallows the default's `MarshalText` error, so an invalid default would otherwise show as `(default )` in help and fail every command with what reads like the operator's mistake. It's a fault only a code change can fix, so the program fails as it starts, as `regexp.MustCompile` does, rather than `New` returning an error every program has to handle.
 - **`Run` is the primitive and `Command` a shortcut over it.** `Command` takes no arguments (`cobra.NoArgs`); a command with its own arguments or flags calls `Run` from its `RunE` and supplies them as fx values.
 - **`RootCommand(name, short)` mirrors `cli.NewRootCommand`,** which it calls, then adds the three flags.
 - **The flag names are constants,** as `cli.ConfigFlag` is.
@@ -204,9 +207,10 @@ root.AddCommand(
 
 ```
 fx.WithLogger(log.NewEventLogger)
+fx.Module("kernel", fx.Invoke(slog.SetDefault))
 log.Module · log.WithDebug · log.WithQuiet · log.WithFormat · log.WithTextHandler (Options.TextHandler, or tint.New)
 configloader.WithFilename(--config)
-fx.Invoke(slog.SetDefault)
+fx.Populate(&logger)
 Options.Shared
 the command's opts
         ─▶ kernelrun.Run(cmd.Context(), kernelrun.Options{StartTimeout, StopTimeout}, …)
@@ -216,10 +220,13 @@ the command's opts
 - **The flags.**
   - `--debug` has no shorthand, `--quiet` has `-q` and `--format` has none. `--config` keeps cli's no-shorthand stance.
   - `--debug` and `--quiet` are mutually exclusive through cobra, so `log`'s "debug wins" only matters for code wiring both by hand.
-  - `--format` is a `TextVar` with `Options.Format` as its default, so `--format yaml` fails during flag parsing.
+  - `--format` is a `TextVar` with `Options.Format` as its default, so `--format yaml` fails during flag parsing. Its usage backquotes a placeholder (``log `format`: …``), since pflag can't name a `TextVar`'s type, so help reads `--format format`.
 - **The text handler is a setting, not fx wiring.** Supplying tint and letting an app override it through fx would mean providing the same tagged value twice, which fx rejects.
 - **`configloader.WithFilename` is always supplied.** In an app that doesn't load config, nothing consumes it. The README says the kernel owns it, since an app supplying its own would collide.
-- **The default logger is set inside the graph and restored outside it.** `fx.Invoke(slog.SetDefault)` routes third-party `slog` and stdlib `log` output through the app's logger from construction on. `Run` saves the previous default and restores it with a `defer` after `kernelrun.Run` returns. An OnStop hook wouldn't run if construction failed after the invoke, and tests that run several apps would leak into each other.
+- **The default logger is set inside the graph and restored outside it.** The invoke making the app's logger slog's default routes third-party `slog` and stdlib `log` output through it. `Run` saves the previous default and restores it with a `defer` after `kernelrun.Run` returns. An OnStop hook wouldn't run if construction failed after the invoke, and tests that run several apps would leak into each other.
+- **The invoke sits in a module of its own, listed first.** fx runs every module's invokes before the root's own, so the first implementation's root-level `fx.Invoke(slog.SetDefault)` ran after the invokes of modules in `Options.Shared` and the command's options, and anything they logged through slog's default came out in the old format. A module listed ahead of the others runs its invoke first.
+- **The log package writes at Warn while the app runs.** Once slog's default is replaced, the log package writes into its handler at slog's bridge level, Info by default, so `--quiet` dropped everything libraries report through it, net/http's ErrorLog included. The log package has no levels, and what goes through it is mostly error reports, so `Run` raises the bridge level to Warn with `slog.SetLogLoggerLevel` and restores it with the rest.
+- **The app's logger is populated for the kernel's own reporting.** `kernelrun` leaves its runner checks' failures to its caller, and fx never sees them, so `Run` logs `ErrNoRunners`, `ErrDuplicateRunner` and `ErrInvalidRunner` at Error itself before silencing cobra (decision 9). Without that, a command with no runners exited 1 with nothing printed or logged.
 
 ### 8. The lifecycle rule for loop modules (→ docs/kernel.md)
 
@@ -237,10 +244,11 @@ The module's own `ProvideRunner` registers through `kernelrun.ProvideRunner` und
 |---|---|---|---|
 | flags | a parse error | cobra (no logger exists yet) | printed |
 | kernel's wiring | `ErrMissingFlag` | cobra | printed |
-| startup | the root cause | fx's event logger, full chain, Error | silenced |
+| building, starting | the root cause | fx's event logger, full chain, Error | silenced |
+| runner checks | `kernelrun`'s check sentinels | `kernel`, Error | silenced |
 | run, stop | crash and stop errors | `kernelrun`, Error, per runner | silenced |
 
-`kernel.Run` sets `cmd.SilenceErrors` whenever `kernelrun.Run` returns an error. Every line a service writes stays in its format: a JSON service doesn't end its stream with a plain-text line. Nothing is reported twice, and `cli.Execute` still takes the exit code from the error. If the logger itself can't be built, fx falls back to its console logger, which still prints the failure.
+`kernel.Run` sets `cmd.SilenceErrors` whenever `kernelrun.Run` returns an error, once the failure has been logged. Every line a service writes stays in its format: a JSON service doesn't end its stream with a plain-text line. Nothing is reported twice, and `cli.Execute` still takes the exit code from the error. If the logger itself can't be built, fx falls back to its console logger, which still prints the failure.
 
 ### 10. Dependencies
 
@@ -288,3 +296,64 @@ go-modules is unaffected.
 ## Open Questions
 
 - The flags' help texts. They can change in a patch.
+
+## What actually happened
+
+Delivered as planned, in two pull requests. PR #14 merged as 548b094 and published `kernelrun/v0.1.0` as an immutable release. `kernel` follows in the second, requiring the published `kernelrun`, `cli` v0.2.1, `log` and `config/configloader`.
+
+Deviations from the design as first written:
+
+- **Two code reviews reshaped decisions 2, 3, 6, 7 and 9 before each release** (next section). The decisions above describe what ships.
+- **`kernel.Run` restores the log package's output and flags as well as slog's default.** `slog.SetDefault` redirects the log package to the new logger's handler, and setting back a default that writes through the log package doesn't undo that redirection. `kernel` therefore imports the standard `log` package, with a scoped `depguard` exception saying why.
+- **The sloglint risk didn't happen.** Saving and restoring slog's default passed lint without a `nolint`.
+- **Every library question resolved without its fallback,** each with a test that stays:
+  - one private `fx.Module` per `ProvideRunner` call;
+  - `fx.RecoverFromPanics` at the top level;
+  - cobra's mutually exclusive group on the root's persistent flags, enforced on a subcommand;
+  - the forbidigo rule reporting a parameter of type `fx.Shutdowner`, checked against a throwaway file.
+
+Findings:
+
+- **fx's `withTimeout` returns the context's error whenever the context is done as a hook returns,** and fx rolls back a failed start with the start context. The first shaped the start-phase clean rule; the second led to `runerr.ErrNotStarted`.
+- **fx runs every module's invokes before the root's own,** in the order the modules are listed.
+- **pflag's `TextVar` reports no type name,** so help needs a backquoted placeholder.
+- **slog bridges the log package at Info by default** once its default is replaced.
+- **gorelease refuses to run on a repository with untracked files.** The local release check ran in a temporary clean worktree of the branch, leaving another change's untracked files where they were.
+
+Follow-ups left open:
+
+- **`testing/kernelruntest`,** when a consumer needs a double.
+- **Readiness:** a health module can build on "a finished `Start` means ready".
+- **Static log attributes** (service, version) and a runner-name attribute on records, each a `log` middleware away.
+- **The flags' help texts,** as listed under Open Questions.
+- **Release:** merging the second pull request publishes `kernel/v0.1.0`; checking the published release, the proxy and pkg.go.dev happens after merge.
+
+## Fixes from code review
+
+The review of `kernelrun` (6804fea) found ten issues. Nine were fixed before its release (task section 6) and one needed no change:
+
+- **When an ending counts as clean.**
+  - A runner returning `ctx.Err()` at the caller's deadline was a crash. → A runner's context error is clean once that context is done, the caller's deadline included (decision 3).
+  - Every start failure was swallowed once the caller's context had ended. → Only a failure that is the context's own ending is clean.
+- **A failed start's rollback.** Its OnStop hooks read a clean nil from `runerr.From`. → The start context carries `runerr.ErrNotStarted`.
+- **A runner exiting through `runtime.Goexit`** never stopped the others and read as clean. → Classifying it and cancelling the rest happen in a `defer`, and it counts as a crash.
+- **Error prefixes.** Build failures shared the `starting the app` prefix with hook failures. → `building the app`.
+- **README.** The documentation of the clean rule contradicted `Func`'s godoc, and the server example's `Shutdown` had no bound. → Both fixed.
+- **Code.** `call` nested a closure. → A named return with a deferred `recover`.
+- **No change.** A missing `AsRunner`: runners are a group, and the constitution's group rule was met.
+
+The review of `kernel` (e1d5204) found seven issues, all fixed before its release (task section 11):
+
+- **Runner-check failures** exited 1 with nothing printed or logged. → `kernel` logs them at Error before silencing cobra (decision 9).
+- **The default logger's invoke** ran after every module's invokes. → It sits in a module of its own, listed first.
+- **`--quiet` dropped everything the log package wrote,** net/http's error reports included. → The bridge level is Warn while the app runs, and restored afterwards.
+- **`--format`'s help** showed no placeholder. → The usage backquotes one.
+- **An invalid `Options.Format`** read as the operator's error on every run. → `New` panics.
+- **Nothing tested that the timeouts reach `kernelrun`.** → Tests added.
+- **The README's Configuration section** broke the constitution's format, and the example lacked an import. → Fixed.
+
+## Rollup at archive
+
+- **Constitution:** the three edits shipped in PR #14: the run-loop rule naming `kernelrun` with the lifecycle rule, the `Module` exception, and the `fx.Shutdowner` ban.
+- **docs/kernel.md** (new): why two modules, how `Run` runs an app and judges endings, signals and `fx.Shutdowner`, the lifecycle rule for loop modules, how failures reach the operator, and how the default logger is set.
+- **The rest** (the flag details, the help placeholder, the exact error messages) is specific to the two modules and lives in their specs, READMEs and this archive.

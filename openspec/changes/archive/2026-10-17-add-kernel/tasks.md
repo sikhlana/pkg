@@ -79,21 +79,21 @@ The review of 6804fea found ten issues; nine are fixed below and one needed no c
 
 Sections 7 to 10 are the second pull request, and wait for `kernelrun/v0.1.0` to be published.
 
-- [ ] 7.1 Once `kernelrun/v0.1.0` is published, branch `add-kernel-wiring` off `origin/main` after `git fetch`.
-- [ ] 7.2 Create `kernel/`:
+- [x] 7.1 Once `kernelrun/v0.1.0` is published, branch `add-kernel-wiring` off `origin/main` after `git fetch`.
+- [x] 7.2 Create `kernel/`:
   - `go.mod` for `github.com/sikhlana/pkg/kernel`, with the go directive from `.go-version`;
   - `VERSION` containing `0.1.0`;
   - require the published `kernelrun`, `cli`, `log` and `config/configloader`, and the latest spf13/cobra, go.uber.org/fx and stretchr/testify.
   - Done when `go build ./...` passes from `kernel/`, and with `GOWORK=off`.
-- [ ] 7.3 Register `./kernel` in the root `go.work`.
-- [ ] 7.4 Settle the cobra question with a test that stays: `--debug` and `--quiet`, made mutually exclusive on the root, are rejected together on a subcommand.
+- [x] 7.3 Register `./kernel` in the root `go.work`.
+- [x] 7.4 Settle the cobra question with a test that stays: `--debug` and `--quiet`, made mutually exclusive on the root, are rejected together on a subcommand.
 
 ## 8. Commands and wiring
 
-- [ ] 8.1 `DebugFlag`, `QuietFlag`, `FormatFlag`, `ErrMissingFlag`, `Options`, `App`, `New` and `RootCommand`: `cli`'s root, `--debug`, `--quiet` with `-q`, mutual exclusion, and `--format` as a `TextVar` defaulting to `Options.Format`. See design decisions 6 and 7.
-- [ ] 8.2 `Run`, as in design decision 7: the flags read from `cmd.Flags()` (`--format` with `GetText`), a missing one failing with `ErrMissingFlag`; the options in the design's order; slog's default saved and restored around `kernelrun.Run`; and `cmd.SilenceErrors` set whenever `kernelrun.Run` returns an error.
-- [ ] 8.3 `Command`, taking no arguments and running the app with its options.
-- [ ] 8.4 Tests through `cli.Execute`, with a recording destination supplied in `Shared` and runners from `kernelrun.WithRunner`:
+- [x] 8.1 `DebugFlag`, `QuietFlag`, `FormatFlag`, `ErrMissingFlag`, `Options`, `App`, `New` and `RootCommand`: `cli`'s root, `--debug`, `--quiet` with `-q`, mutual exclusion, and `--format` as a `TextVar` defaulting to `Options.Format`. See design decisions 6 and 7.
+- [x] 8.2 `Run`, as in design decision 7: the flags read from `cmd.Flags()` (`--format` with `GetText`), a missing one failing with `ErrMissingFlag`; the options in the design's order; slog's default saved and restored around `kernelrun.Run`; and `cmd.SilenceErrors` set whenever `kernelrun.Run` returns an error.
+- [x] 8.3 `Command`, taking no arguments and running the app with its options.
+- [x] 8.4 Tests through `cli.Execute`, with a recording destination supplied in `Shared` and runners from `kernelrun.WithRunner`:
   - the root's flags: `-q` on a subcommand, `--debug --quiet` together, `--format yaml`, and the program's default format;
   - the app: the level, the program's text handler, tint by default, fx's events under `--debug`, `--config` reaching the loader, and shared and own options together;
   - a root without the kernel's flags, and a shortcut command given an argument;
@@ -102,16 +102,29 @@ Sections 7 to 10 are the second pull request, and wait for `kernelrun/v0.1.0` to
 
 ## 9. kernel docs
 
-- [ ] 9.1 Write `kernel/README.md` in the constitution's order:
+- [x] 9.1 Write `kernel/README.md` in the constitution's order:
   - overview;
   - Configuration: none, with `Options` as developer settings and the flags as per-run choices;
   - Exported Members: every export, with the `Options` fields and the `App` methods;
   - Usage: a `main` with `cli.Main`, `RootCommand`, a shortcut command, a command with an argument through `Run`, config through `Shared`, and the kernel owning `configloader.WithFilename`;
   - how failures are reported.
   - No backticks in table cells.
-- [ ] 9.2 In the root `README.md`, add the `kernel` row to the Modules table in alphabetical order.
+- [x] 9.2 In the root `README.md`, add the `kernel` row to the Modules table in alphabetical order.
 
 ## 10. kernel verification
 
-- [ ] 10.1 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
-- [ ] 10.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 10.1 and 10.2.
+- [x] 10.1 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
+- [x] 10.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 10.1 and 10.2.
+
+## 11. kernel code review fixes
+
+The review of e1d5204 found seven issues, two reproduced. All are fixed below; design decisions 6, 7 and 9 and the kernel spec record the outcome.
+
+- [x] 11.1 `Run` populates the app's logger and logs a failure of `kernelrun`'s runner checks (`ErrNoRunners`, `ErrDuplicateRunner`, `ErrInvalidRunner`) at Error before silencing cobra; nobody else reports them. Test: a command with no runners prints nothing, logs the failure at Error and exits 1.
+- [x] 11.2 The invoke making the app's logger slog's default sits in a module of its own listed first, since fx runs every module's invokes before the root's. Test: a shared module's invoke logging through slog's default writes in the app's format.
+- [x] 11.3 While the app runs, the log package writes into the app's logger at Warn (`slog.SetLogLoggerLevel`), so `--quiet` keeps what libraries report through it; the level is restored with the default. Tests: a `log.Print` under `-q` reaches the log at Warn, and the level is back after a clean run and a startup failure.
+- [x] 11.4 `--format`'s usage backquotes a placeholder, so help reads `--format format`. Test: the help output.
+- [x] 11.5 `New` panics, with an error matching `log.ErrUnknownFormat`, on an `Options.Format` that's neither json nor text. Test: `log.Format(5)`.
+- [x] 11.6 Tests that `Options.StartTimeout` and `Options.StopTimeout` reach `kernelrun`: a blocking OnStart hook fails the start, and a blocking OnStop hook fails the stop, each well inside the default.
+- [x] 11.7 README: Configuration says none, with the flags table moved under Usage; the example imports `context`; the failure table gains the runner checks; the default logger's module and the log package's level are documented.
+- [x] 11.8 Repeat 10.1 and 10.2: lint reports 0 issues, `go test ./...` and `go test -race ./...` pass in `kernel/`, `GOWORK=off` builds and tidies clean, and the `-short` sweep passes across all six modules.

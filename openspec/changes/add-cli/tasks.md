@@ -84,7 +84,7 @@ Side effects and how each is undone:
 - the scratch directories are deleted after each check;
 - the `cli/v0.1.0` release is immutable and intended, and can't be undone. A broken v0.1.0 is fixed forward (decision in design.md, Migration Plan).
 
-- [ ] 8.1 Commit, then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"). `plan` prints `["cli"]`, and `check` passes: new module at 0.1.0, gorelease against no base.
+- [x] 8.1 Commit, then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"). `plan` prints `["cli"]`, and `check` passes: new module at 0.1.0, gorelease against no base.
 - [ ] 8.2 Push and open the PR. Check `git diff --stat origin/main...HEAD` lists only the intended files. In CI, `plan` outputs `["cli"]`, lint and test run for `cli`, release check passes, and CI OK passes. Record the run.
 - [ ] 8.3 Trigger each failure as a new commit, record release check's message, then revert it with another new commit. Never amend or force-push:
   - `VERSION` set to `0.2.0` (a new module must start at 0.1.0);

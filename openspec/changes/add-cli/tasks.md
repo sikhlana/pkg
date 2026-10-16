@@ -113,12 +113,13 @@ Side effects and how each is undone:
 - the `cli/v0.1.0` release is immutable and intended, and can't be undone. A broken v0.1.0 is fixed forward (decision in design.md, Migration Plan).
 
 - [x] 9.1 Commit, then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"). `plan` prints `["cli"]`, and `check` passes: new module at 0.1.0, gorelease against no base.
-- [ ] 9.2 Push and open the PR. Check `git diff --stat origin/main...HEAD` lists only the intended files. In CI, `plan` outputs `["cli"]`, lint and test run for `cli`, release check passes, and CI OK passes. Record the run.
-- [ ] 9.3 Trigger each failure as a new commit, record release check's message, then revert it with another new commit. Never amend or force-push:
-  - `VERSION` set to `0.2.0` (a new module must start at 0.1.0);
-  - `go 1.26` in `cli/go.mod` (doesn't match `.go-version`);
-  - `./cli` removed from `go.work` (go.work must list every module).
-  - Confirm CI OK is green again after the last revert.
+- [x] 9.2 Push and open the PR. Check `git diff --stat origin/main...HEAD` lists only the intended files. In CI, `plan` outputs `["cli"]`, lint and test run for `cli`, release check passes, and CI OK passes. Record the run. (PR #5, after merging `origin/main` in as 12ec404; the diff listed only `cli/`, `go.work`, `README.md`, `openspec/config.yaml` and this change. Run 38840052642: `modules=["cli"]`, `| cli | new | 0.1.0 | pass |`, every job passed.)
+- [x] 9.3 Trigger each failure as a new commit, record release check's message, then revert it with another new commit. Never amend or force-push:
+  - `VERSION` set to `0.2.0` (a new module must start at 0.1.0). Run 38840258777 on eed9a45: "cli is new, and a new module starts at 0.1.0, not 0.2.0", annotated on `cli/VERSION`. Lint and test still passed.
+  - `go 1.26` in `cli/go.mod` (doesn't match `.go-version`). Run 38840358086 on 6efa94d: "cli/go.mod declares go 1.26, want 1.27 from .go-version", annotated on `cli/go.mod`.
+  - `./cli` removed from `go.work` (go.work must list every module). Run 38840474926 on b95335d: "cli has a go.mod but isn't registered in go.work", annotated on `go.work`. `plan` selected no modules, so lint and test were skipped, and the report had no `cli` row: without the entry, `cli` isn't a library module.
+  - Confirm CI OK is green again after the last revert. Run 38840589817 on 1427df6 passed, and the tree matched 12ec404 again (empty diff).
+  - Each later push carried the previous revert and the next failure as separate commits, so it took four runs instead of six.
 - [ ] 9.4 Squash-merge. `release.yaml`'s publish creates tag `cli/v0.1.0` on the merge commit, with a GitHub release that's titled with the tag, isn't marked latest, and has notes listing the `cli/` commits. The proxy request succeeds or warns. Record the run.
 - [ ] 9.5 Consumer check against the published version, in a fresh temp module with `GOWORK=off` and no `replace`: `go get github.com/sikhlana/pkg/cli@v0.1.0` resolves through proxy.golang.org and verifies against sum.golang.org, and the 7.3 scratch program builds and prints its version line.
 - [ ] 9.6 pkg.go.dev shows `github.com/sikhlana/pkg/cli@v0.1.0` with the MIT license detected. Request the page if it isn't indexed yet.

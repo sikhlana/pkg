@@ -13,9 +13,12 @@ updates:
 
   - package-ecosystem: gomod
     directory: /tools/release
-    # gorelease's module is required only by a tool directive, so go.mod
-    # marks it // indirect; the default (direct only) would never bump it.
+    # Direct dependencies only, plus gorelease's module: it's required
+    # only by a tool directive, so go.mod marks it // indirect. Its entry
+    # names the type too, since GitHub defaults a missing one to direct.
     allow:
-      - dependency-type: all
+      - dependency-type: direct
+      - dependency-name: golang.org/x/exp
+        dependency-type: all
     schedule:
       interval: weekly

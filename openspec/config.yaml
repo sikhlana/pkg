@@ -26,8 +26,8 @@ context: |
 
   Versioning and releases:
   - Modules are tagged <module>/v<version>; nested modules keep their
-    path (http/server/v0.2.0). CI creates the tag and GitHub release on
-    merge to main. Never tag by hand.
+    path (http/httpserver/v0.2.0). CI creates the tag and GitHub release
+    on merge to main. Never tag by hand.
   - Each module has a VERSION file holding its semver. Every PR that
     changes a module's files bumps that module's VERSION, including
     test-only, README, godoc and example edits, and compile fixes
@@ -72,9 +72,10 @@ context: |
     CI checks it. Branch commits follow the same form.
   - Types: feat, fix, perf, refactor, test, docs, build (go.mod and
     dependencies), ci (workflows and tools/release), chore, revert.
-  - The scope is the directory of the one module or tool a change
-    touches (cli, http/server, tools/release), or openspec for a
-    spec-only change. Leave it out when a change spans several.
+  - The scope is the package name of the one module a change touches
+    (cli, httpserver), the directory of the one tool (tools/release), or
+    openspec for a spec-only change. Leave it out when a change spans
+    several.
   - ! marks a breaking change to a module's exported API at any
     version, even before 1.0, where it takes only a minor bump.
   - The description is lowercase and imperative, with no trailing
@@ -85,17 +86,19 @@ context: |
   fx integration:
   - A package that owns state, runs work, or wires services exports an
     fx.Module variable named exactly Module. Utility packages, pure
-    function primitives and <module>test/ packages don't.
-  - fx.Module names are plain for top-level modules ("logger") and
-    colon-separated, mirroring the path, for nested ones
-    ("http:server").
+    function primitives and <module>test/ packages don't. The one
+    exception is config/configloader: its provider is generic over the
+    app's config type, so it's a function, Provide[T], not a variable.
+  - fx.Module names are the module's package name ("logger",
+    "configloader").
   - Every constructor registered with fx.Provide takes a single Params
     struct embedding fx.In, even for one dependency. Name it Params, or
     by purpose (PublisherParams) when a module has several. The
     fx.Lifecycle field is named Lifecycle. Optional dependencies use
     `optional:"true"`.
-  - Name tags are name:"<module>:<purpose>:<name>", built by an
-    exported helper (ConfigNameTag(name)) so callers never format them.
+  - Name tags are name:"<module>:<purpose>:<name>", where <module> is
+    the package name, as in group tags below. An exported helper
+    (ConfigNameTag(name)) builds them so callers never format them.
     Group tags are group:"<module>:<purpose>", exposed as an exported
     constant. A new group ships the constant, a typed ProvideX helper
     that tags the caller's constructor, and a collector that takes the
@@ -121,6 +124,9 @@ context: |
   - Config fields carry mapstructure snake_case tags. config.go holds
     only operator config, never structural values like component name
     or version.
+  - A Config never has both x and x_file, since config/configloader
+    reads X_FILE as a file holding X and the two env names would
+    collide. A module's own path fields are named *_path.
   - Developer wiring (loggers, HTTP clients, callbacks, component
     names) is a typed fx value with a pair of helpers: AsX annotates a
     value or a constructor, WithX(v) wraps fx.Supply(AsX(v)). Ship both
@@ -128,12 +134,15 @@ context: |
   - Where zero means "unset", pair an exported Default* constant with
     an unexported resolver method on Config. Don't where zero is a
     legitimate value.
-  - Validate tags check value shape (omitempty, url, oneof). Never use
-    the required tag: the tag pass also walks dormant mode-specific
-    structs. Required fields and cross-field invariants go in a
-    Validate() error method returning exported sentinels. Config is
-    validated once where it's loaded; Provider closures validate the
-    Config they're handed; fx-wired constructors trust their input.
+  - Validate tags check value shape and presence (required, url,
+    oneof). A mode-dispatching Config marks each mode-specific field
+    validate:"-", so the tag pass never reaches a dormant struct, and
+    its Validate() error method delegates to the active one with
+    configvalidator.ValidateField, returning the result directly or
+    joined. Cross-field invariants go in Validate() too, returning
+    exported sentinels. Config is validated once where it's loaded;
+    Provider closures validate the Config they're handed; fx-wired
+    constructors trust their input.
 
   Run loops and cross-module integration:
   - A long-running loop (server, receiver, poller) is split: Module
@@ -235,6 +244,13 @@ context: |
     ├── *_test.go
     └── mymoduletest/                 optional consumer-facing doubles
 
+  - A nested module lives at <group>/<group><name> (config/configloader,
+    http/httpserver), and its package name equals its directory name.
+    Outside the filesystem path and the tag, which the go command
+    needs, the package name is the module's identity: its fx.Module
+    name, the <module> segment of its name and group tags, its spec
+    folder and its commit scope.
+
   Documentation:
   - A module README has, in order: title; a one- or two-sentence
     overview; ## Configuration (Field, Type, Description);
@@ -253,9 +269,9 @@ context: |
     cross-module pattern or non-obvious trade-off exists.
 
   Specs:
-  - One spec per module: openspec/specs/<module>/spec.md. Folder names
-    are kebab-case; nested paths flatten with a dash (http/server ->
-    http-server).
+  - One spec per module, at openspec/specs/<package>/spec.md, named
+    after the module's package (openspec/specs/configloader). Specs
+    for anything else use kebab-case folder names (release-ci).
   - Specs hold the behavioural guarantees a module makes to consumers.
     Project-wide patterns live in this block, not in per-module specs.
   - A <module>test/ package is specced only when consumers depend on

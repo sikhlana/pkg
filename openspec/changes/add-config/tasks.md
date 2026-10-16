@@ -95,8 +95,8 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
 
 The `config/configvalidator/v0.1.0` release is immutable and intended. A broken release is fixed forward (design.md, Migration Plan).
 
-- [x] 8.1 Commit by pathspec, after checking `git diff --cached --name-status`. Then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"): `plan` prints `["config/configvalidator"]`, and `check` passes for a new module at 0.1.0.
-- [ ] 8.2 Draft the PR title (`feat(configvalidator): add config validator`) and body in the conversation. After approval, push and open it. Check `git diff --stat origin/main...HEAD` lists only `config/configvalidator/`, `go.work`, `README.md`, `openspec/config.yaml` and this change. In CI, `plan` selects `config/configvalidator`, lint, test, release check and the PR title check pass, and CI OK is green. Record the run.
+- [x] 8.1 Commit by pathspec, after checking `git diff --cached --name-status`. Then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"): `plan` prints `["cli","config/configvalidator"]`, since a `go.work` change selects every module for lint and test, and `check` passes for `config/configvalidator` alone, a new module at 0.1.0.
+- [ ] 8.2 Draft the PR title (`feat(configvalidator): add config validator`) and body in the conversation. After approval, push and open it. Check `git diff --stat origin/main...HEAD` lists only `config/configvalidator/`, `go.work`, `README.md`, `openspec/config.yaml` and this change. In CI, `plan` selects `cli` and `config/configvalidator`, lint, test, release check and the PR title check pass, and CI OK is green. Record the run.
 - [ ] 8.3 After the squash merge, publish creates `config/configvalidator/v0.1.0` with a GitHub release. Record the run.
 - [ ] 8.4 Consumer check in a fresh temp module with `GOWORK=off` and no `replace`, printing one line per check and confirming three lines:
   - `go get github.com/sikhlana/pkg/config/configvalidator@v0.1.0` resolves through proxy.golang.org;
@@ -212,7 +212,7 @@ Done first, because the design relies on these behaviours (design decision 15). 
 
 The `config/configloader/v0.1.0` release is immutable and intended, and is fixed forward if broken. The scratch directory in 18.4 is deleted afterwards.
 
-- [ ] 18.1 Commit by pathspec, after checking `git diff --cached --name-status`. Confirm `config/configloader/go.mod` requires the published `config/configvalidator v0.1.0` and has no `replace`. Run `plan` and `check` locally against `origin/main`: `plan` prints `["config/configloader"]`, and `check` passes for a new module at 0.1.0.
+- [ ] 18.1 Commit by pathspec, after checking `git diff --cached --name-status`. Confirm `config/configloader/go.mod` requires the published `config/configvalidator v0.1.0` and has no `replace`. Run `plan` and `check` locally against `origin/main`: `plan` prints every module in `go.work`, since the `go.work` change selects them all for lint and test, and `check` passes for `config/configloader` alone, a new module at 0.1.0.
 - [ ] 18.2 Draft the PR title (`feat(configloader): add config loader`) and body in the conversation. After approval, push and open it. Check `git diff --stat origin/main...HEAD` lists only `config/configloader/`, `go.work`, `README.md`, `docs/config.md` and this change. In CI, the `GOWORK=off` build resolves `config/configvalidator v0.1.0` from the proxy, which is the first real run of the dependency-tier rule. Lint, test, release check and the PR title check pass, and CI OK is green. Record the run.
 - [ ] 18.3 After the squash merge, publish creates `config/configloader/v0.1.0` with a GitHub release. Record the run.
 - [ ] 18.4 Consumer check in a fresh temp module with `GOWORK=off` and no `replace`, printing one line per check and confirming four lines:

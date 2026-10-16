@@ -1,19 +1,20 @@
 ## Why
 
-The repo has release CI but no library module, so `plan`, `check` and `publish` have only ever run against fixture repositories. `cli` is the smallest useful module in idio/go-modules, which makes it a good first release: small enough to review closely, and real enough to take the release flow end to end by hand. It's rebuilt rather than copied. Since the original was written, Go has started stamping version-control data into binaries and naming the signal in `signal.NotifyContext`'s cause. The original also has gaps: a nil-error panic, a second Ctrl-C that does nothing, and two version outputs that disagree.
+The repo has release CI but no library module, so `plan`, `check` and `publish` have only ever run against fixture repositories. `cli` is the smallest useful module in idio/go-modules, which makes it a good first release: small enough to review closely, and real enough to take the release flow end to end by hand. It's rebuilt rather than copied. Since the original was written, Go has started stamping version-control data into binaries. The original also has gaps: a nil-error panic, a second Ctrl-C that does nothing, and two version outputs that disagree.
 
 ## What Changes
 
 - New module `cli` (`github.com/sikhlana/pkg/cli`), starting at 0.1.0. It provides Cobra scaffolding for a program's `main`:
-  - **A signal-aware context.** The first SIGINT or SIGTERM cancels it, and `context.Cause` names the signal. The handler is then released, so a second signal ends the process.
-  - **Execute.** Runs a root command with a context and turns its error into a process exit code: 0 on success, the code carried by an `ExitError` in the error chain, and 1 otherwise. A carried code of zero or less becomes 1, so a failed command never exits 0.
-  - **ExitError and one constructor, `Exit(code, err)`.** It works with `errors.New` and `fmt.Errorf` instead of mirroring them. A nil `err` is allowed, and its message is `exit status N`. Cobra still prints errors; a command that wants to exit quietly sets cobra's `SilenceErrors`.
-  - **A root command factory.** It sets the name and short description, and a persistent `--config`/`-c` flag whose name is an exported constant. It also turns usage text off for runtime errors and sets a `--version` flag that prints the build line.
-  - **A version subcommand.** It prints the same line as `--version` and takes the program name from the root command.
+  - **A signal-aware context.** The first SIGINT or SIGTERM cancels it, and `context.Cause` is a `SignalError` carrying the signal. The handler is released before the context is cancelled, so a second signal ends the process.
+  - **Execute.** Runs a command tree's root with a context, which every command in the tree gets, and turns its error into a process exit code: 0 on success, the code carried by an `ExitError` in the error chain, and 1 otherwise. A carried code outside 1 to 255 becomes 1, so a failed command never exits 0.
+  - **ExitError and one constructor, `Exit(code, err)`, returning `error`.** It works with `errors.New` and `fmt.Errorf` instead of mirroring them. A nil `err` is allowed, and its message is `exit status N`. Cobra still prints errors; a command that wants to exit quietly sets cobra's `SilenceErrors`.
+  - **A root command factory.** It sets the name and short description, and a persistent `--config` flag whose name is an exported constant. The flag has no shorthand, so subcommands keep every letter. It also turns usage text off for runtime errors and sets a `--version` flag that prints the build line.
+  - **A version subcommand.** It prints the same line as `--version`, taking the program name and version from the root command.
   - **Build info.** Values set with `-ldflags -X` take precedence, then whatever the go command stamped into the binary (main module version, VCS revision, commit time, modified flag), then `dev`.
 - How it differs from go-modules' `cli`:
   - `SignalContext` takes a parent context, and a second signal kills the process.
-  - `Exit(code, err)` replaces `Exit(code, text)` and `Exitf`.
+  - `Exit(code, err)` replaces `Exit(code, text)` and `Exitf`, and returns `error`.
+  - `--config` loses its `-c` shorthand.
   - An `ExitError` with a nil `Err` no longer panics.
   - Build info falls back to `debug.ReadBuildInfo`. `GitCommit` and `BuildDate` become `Revision` and `Time`, and `Time` is the commit time, not the build time.
   - `NewVersionCommand` takes no name.

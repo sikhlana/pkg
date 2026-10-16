@@ -10,16 +10,20 @@ None. `cli` runs in `main`, before any configuration is loaded. The root command
 
 | Name | Description |
 |------|-------------|
-| SignalContext | Returns a copy of a parent context that the first SIGINT or SIGTERM cancels, with a cause naming the signal. A second signal ends the process. |
-| Execute | Runs a root command with a context and returns the process exit code for its result. |
+| SignalContext | Returns a copy of a parent context that the first SIGINT or SIGTERM cancels, with a SignalError as its cause. A second signal ends the process. |
+| SignalError | The cause of a context that SignalContext cancelled; errors.Is matches it against context.Canceled. |
+| SignalError.Signal | The signal that cancelled the context. |
+| SignalError.Error | Returns the signal's name followed by signal received, such as interrupt signal received. |
+| SignalError.Is | Reports whether the target is context.Canceled. |
+| Execute | Runs a command tree's root with a context, given to every command in the tree, and returns the process exit code for its result. |
 | ExitError | An error that chooses the process exit code, returned from a command directly or wrapped. |
-| ExitError.Code | The exit code. Execute turns zero or less into 1. |
+| ExitError.Code | The exit code. Codes outside 1 to 255 exit 1. |
 | ExitError.Err | The underlying error, or nil. |
-| ExitError.Error | Returns the underlying error's message, or exit status N when Err is nil. |
+| ExitError.Error | Returns the underlying error's message, or exit status N, the code the process exits with, when Err is nil. |
 | ExitError.Unwrap | Returns the underlying error. |
-| Exit | Returns an ExitError with a code and an underlying error, which may be nil. |
-| NewRootCommand | Returns a root command with a persistent --config (-c) flag, a --version flag, and no usage text on errors. |
-| NewVersionCommand | Returns a version subcommand that prints the same line as --version. |
+| Exit | Returns an error, always an ExitError, with a code and an underlying error, which may be nil. |
+| NewRootCommand | Returns a root command with a persistent --config flag (no shorthand), a --version flag, and no usage text on errors. |
+| NewVersionCommand | Returns a version subcommand that prints the root's name and Version, the same line as --version. |
 | ConfigFlag | The name of the config flag, for reading it with cmd.Flags().GetString. |
 | Version | The version, set at link time. Empty unless the build sets it. |
 | Revision | The version-control revision, set at link time. Empty unless the build sets it. |
@@ -89,9 +93,12 @@ A failing command prints `Error: <message>` on standard error and exits 1. The u
 
 #### Signals
 
-The first Ctrl-C (SIGINT) or SIGTERM cancels the context every command receives, and `context.Cause(ctx)` names the signal. The program then shuts down at its own pace, and exits 0 if it shuts down cleanly. A second Ctrl-C ends the process straight away, with the operating system's usual status (130 in a shell).
+The first Ctrl-C (SIGINT) or SIGTERM cancels the context every command receives, and `context.Cause(ctx)` is a `*cli.SignalError` naming the signal. The program then shuts down at its own pace, and exits 0 if it shuts down cleanly. A second Ctrl-C ends the process straight away, with the operating system's usual status (130 in a shell).
 
-That second signal only gets through if nothing else in the program subscribes to SIGINT or SIGTERM with `signal.Notify`. Another subscriber keeps receiving it, so the process carries on.
+The handler is released before the context is cancelled, so the second signal gets whatever action the process started with. That's normally the default, which ends the process, with two exceptions:
+
+- A process started with the signal ignored, such as a background job in a script (`myapp &`), ignores it again. SIGTERM still ends it.
+- Anything else in the program that subscribes to SIGINT or SIGTERM with `signal.Notify` keeps receiving it, so the process carries on.
 
 #### Exit codes
 
@@ -103,13 +110,7 @@ return cli.Exit(2, fmt.Errorf("reading %s: %w", path, err))
 return fmt.Errorf("serving: %w", cli.Exit(3, err))
 ```
 
-A code of zero or less exits 1, so a failed command never reports success. A command that wants an interrupted run to exit 130, as a shell reports it, returns the code once its context is done:
-
-```go
-if cmd.Context().Err() != nil {
-	return cli.Exit(130, nil)
-}
-```
+A code outside 1 to 255 exits 1, so a failed command never reports success: Unix keeps only the low 8 bits of an exit code, so 256 would otherwise exit 0.
 
 #### Quiet exits
 
@@ -141,10 +142,16 @@ A build without the `.git` directory, such as a Docker build that excludes it, s
 
 ```bash
 go build -ldflags "\
-  -X github.com/sikhlana/pkg/cli.Version=${VERSION} \
-  -X github.com/sikhlana/pkg/cli.Revision=${REVISION} \
-  -X github.com/sikhlana/pkg/cli.Time=${COMMIT_TIME}" \
+  -X 'github.com/sikhlana/pkg/cli.Version=${VERSION}' \
+  -X 'github.com/sikhlana/pkg/cli.Revision=${REVISION}' \
+  -X 'github.com/sikhlana/pkg/cli.Time=${COMMIT_TIME}'" \
   ./cmd/myapp
+```
+
+The single quotes keep a value with spaces in one piece. `Time` takes any format, but the one the go command stamps is the commit time in UTC, RFC 3339, which git prints with:
+
+```bash
+COMMIT_TIME=$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ)
 ```
 
 Each value set at link time wins, and each one left unset still comes from version control, so a CI job can set `Version` alone. `ReadBuildInfo` returns the same values as a `BuildInfo`, for a program that also wants them elsewhere, such as a log attribute.

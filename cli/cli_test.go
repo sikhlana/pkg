@@ -66,6 +66,26 @@ func TestVersionFlagMatchesSubcommand(t *testing.T) {
 	assert.Equal(t, want, execute(t, newRoot(), "version"))
 }
 
+func TestVersionFollowsTheRoot(t *testing.T) {
+	want := result{stdout: "myapp 1.4.0\n"}
+
+	for _, args := range [][]string{{"--version"}, {"version"}} {
+		root := newRoot()
+
+		root.Version = "1.4.0"
+
+		assert.Equal(t, want, execute(t, root, args...))
+	}
+}
+
+func TestVersionCommandUnderAnyRoot(t *testing.T) {
+	root := &cobra.Command{Use: "other"}
+
+	root.AddCommand(cli.NewVersionCommand())
+
+	assert.Equal(t, result{stdout: "other " + cli.ReadBuildInfo().String() + "\n"}, execute(t, root, "version"))
+}
+
 func TestConfigFlagReachesSubcommand(t *testing.T) {
 	tests := []struct {
 		name string
@@ -73,8 +93,7 @@ func TestConfigFlagReachesSubcommand(t *testing.T) {
 		want string
 	}{
 		{name: "unset", args: []string{"serve"}, want: ""},
-		{name: "shorthand", args: []string{"serve", "-c", "/etc/myapp.yaml"}, want: "/etc/myapp.yaml"},
-		{name: "long", args: []string{"serve", "--config", "/etc/myapp.yaml"}, want: "/etc/myapp.yaml"},
+		{name: "set", args: []string{"serve", "--config", "/etc/myapp.yaml"}, want: "/etc/myapp.yaml"},
 	}
 
 	for _, tt := range tests {
@@ -96,6 +115,26 @@ func TestConfigFlagReachesSubcommand(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestSubcommandOwnsEveryShorthand(t *testing.T) {
+	var got int
+
+	serve := &cobra.Command{
+		Use: "serve",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+
+			got, err = cmd.Flags().GetInt("concurrency")
+
+			return err
+		},
+	}
+
+	serve.Flags().IntP("concurrency", "c", 1, "number of workers")
+
+	require.Equal(t, result{}, execute(t, newRoot(serve), "serve", "-c", "4"))
+	assert.Equal(t, 4, got)
 }
 
 // newRoot returns a root command from NewRootCommand with the version subcommand and the given subcommands.

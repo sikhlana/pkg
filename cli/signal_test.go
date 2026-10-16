@@ -30,22 +30,28 @@ func TestSignalContextStartsLive(t *testing.T) {
 }
 
 func TestSignalContextFirstSignalCancels(t *testing.T) {
-	ctx, stop := cli.SignalContext(t.Context())
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
+		t.Run(sig.String(), func(t *testing.T) {
+			ctx, stop := cli.SignalContext(t.Context())
 
-	defer stop()
+			defer stop()
 
-	require.NoError(t, syscall.Kill(os.Getpid(), syscall.SIGINT))
+			require.NoError(t, syscall.Kill(os.Getpid(), sig))
 
-	select {
-	case <-ctx.Done():
-	case <-time.After(5 * time.Second):
-		require.FailNow(t, "context not cancelled by SIGINT")
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+				require.FailNow(t, "context not cancelled by the signal")
+			}
+
+			cause := context.Cause(ctx)
+
+			sigErr, ok := errors.AsType[*cli.SignalError](cause)
+			require.True(t, ok, "cause is %v", cause)
+			assert.Equal(t, sig, sigErr.Signal)
+			assert.ErrorIs(t, cause, context.Canceled)
+		})
 	}
-
-	cause := context.Cause(ctx)
-
-	require.ErrorIs(t, cause, context.Canceled)
-	assert.ErrorContains(t, cause, os.Interrupt.String())
 }
 
 func TestSignalContextParentCancels(t *testing.T) {
@@ -58,6 +64,19 @@ func TestSignalContextParentCancels(t *testing.T) {
 	cancel()
 
 	assert.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestSignalContextStopCancels(t *testing.T) {
+	ctx, stop := cli.SignalContext(t.Context())
+
+	stop()
+	stop()
+
+	assert.ErrorIs(t, context.Cause(ctx), context.Canceled)
+}
+
+func TestSignalErrorMessage(t *testing.T) {
+	assert.EqualError(t, &cli.SignalError{Signal: os.Interrupt}, "interrupt signal received")
 }
 
 func TestSignalContextSecondSignalTerminates(t *testing.T) {
@@ -79,21 +98,25 @@ func TestSignalContextSecondSignalTerminates(t *testing.T) {
 
 	require.NoError(t, child.Start())
 
+	// t.Context is cancelled before cleanups run, which kills a child left running by a failed check; this reaps it.
+	// After a successful Wait it returns at once.
+	t.Cleanup(func() { _ = child.Wait() })
+
 	lines := bufio.NewScanner(stdout)
 
 	require.True(t, lines.Scan())
 	require.Equal(t, "ready", lines.Text())
 
-	require.NoError(t, child.Process.Signal(os.Interrupt))
+	// SIGINT first and SIGTERM second: a background job started from a script inherits SIGINT ignored, and that's
+	// what a second SIGINT would get once the handler is released.
+	require.NoError(t, child.Process.Signal(syscall.SIGINT))
 
 	require.True(t, lines.Scan())
 	require.Equal(t, "cancelled", lines.Text())
 
-	// The handler is released on its own goroutine just after cancellation, so leave it a moment, as a person
-	// pressing Ctrl-C twice would.
-	time.Sleep(100 * time.Millisecond)
+	require.NoError(t, child.Process.Signal(syscall.SIGTERM))
 
-	require.NoError(t, child.Process.Signal(os.Interrupt))
+	assert.False(t, lines.Scan(), "child printed %q after cancellation", lines.Text())
 
 	exitErr, ok := errors.AsType[*exec.ExitError](child.Wait())
 	require.True(t, ok, "child exited normally")
@@ -102,7 +125,7 @@ func TestSignalContextSecondSignalTerminates(t *testing.T) {
 	require.True(t, ok)
 
 	assert.True(t, status.Signaled())
-	assert.Equal(t, syscall.SIGINT, status.Signal())
+	assert.Equal(t, syscall.SIGTERM, status.Signal())
 }
 
 // runSignalChild is the child half of TestSignalContextSecondSignalTerminates: a program that ignores its context

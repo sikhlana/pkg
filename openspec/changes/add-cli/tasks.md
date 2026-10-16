@@ -77,25 +77,53 @@
   - a command that ignores its context, sent Ctrl-C twice: the second kills it, with exit status 130.
   - Delete the temp directory afterwards.
 
-## 8. Release by hand
+## 8. Code review fixes
+
+From the code review of 8c0dcd1, run before the PR. design.md records each decision; tests cover each fix.
+
+- [x] 8.1 `SignalContext` owns its handler: one goroutine calls `signal.Stop` before cancelling, and `stop` releases synchronously (design decision 1). It no longer uses `NotifyContext` and `AfterFunc`, so the window that swallowed a second signal is gone.
+- [x] 8.2 New export `SignalError`, the cancellation cause: it carries the signal and matches `context.Canceled`.
+- [x] 8.3 Signal tests:
+  - the first signal is checked for both SIGINT and SIGTERM;
+  - the second-signal test sends SIGTERM with no sleep, so it passes when started with SIGINT ignored (`bash -c '… & wait'`);
+  - the child is reaped by `t.Cleanup`, and its output is read to EOF before `Wait`;
+  - new tests for `stop` called twice and the `SignalError` message.
+- [x] 8.4 `Exit` returns `error`, so a nil `*ExitError` from a helper can no longer reach cobra or `Execute` as a non-nil error (design decision 3).
+- [x] 8.5 Codes outside 1–255 exit 1, so `Exit(256, …)` no longer exits 0. `Error()` and `Execute` share the normalisation, so `exit status N` names the code the process really exits with. Tests cover 255, 256, and the messages for 0 and 256.
+- [x] 8.6 `Execute` runs `cmd.Root()` and gives `ctx` to every command in the tree first. Tests cover a reused tree and being handed a subcommand.
+- [x] 8.7 `--config` has no shorthand (design decision 6). The test for a subcommand defining its own `-c` replaces the shorthand test.
+- [x] 8.8 The version subcommand prints the root's `Version`, falling back to `ReadBuildInfo`. Tests cover an overridden root `Version` and a root not built by `NewRootCommand`.
+- [x] 8.9 README:
+  - `SignalError` rows;
+  - `Exit` returns `error`;
+  - the 1–255 rule;
+  - no `-c`;
+  - the started-ignored signal exception;
+  - the exit-130 snippet deleted;
+  - `-X` values quoted, with an RFC 3339 commit-time command.
+- [x] 8.10 The proposal, spec and design updated to match. `openspec validate add-cli --strict` passes.
+- [x] 8.11 Verification chain on `cli/` (modernize, golangci-lint with and without `--fix`, full `go test`), plus `go test -count=20 -race -run Signal`, then the short sweep across `go.work`.
+- [x] 8.12 Repeat the 7.3 build check with a scratch program and the new code: tagged build, uncommitted edit, `-ldflags` version, `-buildvcs=false`, a quoted `-X` time with spaces, and two real SIGINTs from a parent that doesn't ignore them (exit status -2, sent with no delay after "cancelled"). 6/6 cases passed, and the scratch directory was removed.
+
+## 9. Release by hand
 
 Side effects and how each is undone:
 - the deliberate-failure commits are reverted with new commits, and squash merge keeps them off `main`;
 - the scratch directories are deleted after each check;
 - the `cli/v0.1.0` release is immutable and intended, and can't be undone. A broken v0.1.0 is fixed forward (decision in design.md, Migration Plan).
 
-- [x] 8.1 Commit, then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"). `plan` prints `["cli"]`, and `check` passes: new module at 0.1.0, gorelease against no base.
-- [ ] 8.2 Push and open the PR. Check `git diff --stat origin/main...HEAD` lists only the intended files. In CI, `plan` outputs `["cli"]`, lint and test run for `cli`, release check passes, and CI OK passes. Record the run.
-- [ ] 8.3 Trigger each failure as a new commit, record release check's message, then revert it with another new commit. Never amend or force-push:
+- [x] 9.1 Commit, then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"). `plan` prints `["cli"]`, and `check` passes: new module at 0.1.0, gorelease against no base.
+- [ ] 9.2 Push and open the PR. Check `git diff --stat origin/main...HEAD` lists only the intended files. In CI, `plan` outputs `["cli"]`, lint and test run for `cli`, release check passes, and CI OK passes. Record the run.
+- [ ] 9.3 Trigger each failure as a new commit, record release check's message, then revert it with another new commit. Never amend or force-push:
   - `VERSION` set to `0.2.0` (a new module must start at 0.1.0);
   - `go 1.26` in `cli/go.mod` (doesn't match `.go-version`);
   - `./cli` removed from `go.work` (go.work must list every module).
   - Confirm CI OK is green again after the last revert.
-- [ ] 8.4 Squash-merge. `release.yaml`'s publish creates tag `cli/v0.1.0` on the merge commit, with a GitHub release that's titled with the tag, isn't marked latest, and has notes listing the `cli/` commits. The proxy request succeeds or warns. Record the run.
-- [ ] 8.5 Consumer check against the published version, in a fresh temp module with `GOWORK=off` and no `replace`: `go get github.com/sikhlana/pkg/cli@v0.1.0` resolves through proxy.golang.org and verifies against sum.golang.org, and the 7.3 scratch program builds and prints its version line.
-- [ ] 8.6 pkg.go.dev shows `github.com/sikhlana/pkg/cli@v0.1.0` with the MIT license detected. Request the page if it isn't indexed yet.
-- [ ] 8.7 Re-run the publish run with `gh run rerun`. It reports nothing to create, and no new tag or release appears.
-- [ ] 8.8 Bump-rule check in a follow-up PR that touches only `cli/`. It carries any fix found in 8.5 or 8.6, or else a `cli/README.md` edit worth making.
+- [ ] 9.4 Squash-merge. `release.yaml`'s publish creates tag `cli/v0.1.0` on the merge commit, with a GitHub release that's titled with the tag, isn't marked latest, and has notes listing the `cli/` commits. The proxy request succeeds or warns. Record the run.
+- [ ] 9.5 Consumer check against the published version, in a fresh temp module with `GOWORK=off` and no `replace`: `go get github.com/sikhlana/pkg/cli@v0.1.0` resolves through proxy.golang.org and verifies against sum.golang.org, and the 7.3 scratch program builds and prints its version line.
+- [ ] 9.6 pkg.go.dev shows `github.com/sikhlana/pkg/cli@v0.1.0` with the MIT license detected. Request the page if it isn't indexed yet.
+- [ ] 9.7 Re-run the publish run with `gh run rerun`. It reports nothing to create, and no new tag or release appears.
+- [ ] 9.8 Bump-rule check in a follow-up PR that touches only `cli/`. It carries any fix found in 9.5 or 9.6, or else a `cli/README.md` edit worth making.
   - Pushed without a bump: release check fails.
   - With `VERSION` at `0.1.1`: it passes.
   - After merge: publish creates `cli/v0.1.1`, with notes listing only commits since `cli/v0.1.0`.

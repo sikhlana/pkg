@@ -136,7 +136,9 @@ context: |
     principal types.
   - Receivers: values for small immutable structs (configs, tokens);
     pointers when a method mutates, the struct is large, or it holds a
-    mutex or channel. Never mix receivers on one type.
+    mutex or channel. Error types take pointer receivers even when
+    small and immutable, so errors.AsType has a single target. Never
+    mix receivers on one type.
   - Errors: lowercase gerund, no trailing period, wrapped with %w
     ("creating client: %w"). Documented failure modes are exported
     sentinels checked with errors.Is. Use errors.AsType[T], not

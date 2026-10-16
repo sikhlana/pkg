@@ -29,8 +29,8 @@ No library module is touched, so there are no VERSION bump, module README or go 
 
 - [x] 5.1 `openspec validate adopt-conventional-commits --strict`.
 - [x] 5.2 Run `go test -short ./...` across every module in `go.work`. Nothing in Go changed, so this confirms nothing else did.
-- [ ] 5.3 Open the PR with a conventional title. The new `PR title` check runs on it and passes, and CI OK passes.
-- [ ] 5.4 Retitle the PR to a free-form title: `PR title` fails without a new commit. Restore the title: it passes again.
+- [x] 5.3 Open the PR with a conventional title. The new `PR title` check runs on it and passes, and CI OK passes. (PR #7 on 08b3b28: `PR title` passed on its first run, with Plan, Release check, tools/release and CI OK green, and lint and test skipped since no module changed.)
+- [x] 5.4 Retitle the PR to a free-form title: `PR title` fails without a new commit. Restore the title: it passes again. ("Require conventional commit titles": run 38843399048 failed with "No release type found in pull request title". Restored: run 38843427094 passed. Head stayed 08b3b28. The `subjectPattern` regex was checked locally with node against six sample subjects, all as expected, including a capitalised Dependabot-style "Bump …" that fails.)
 
 ## 6. Rollout
 

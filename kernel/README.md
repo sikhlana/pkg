@@ -115,7 +115,7 @@ A command checks its config by registering a runner that returns once the config
 
 Before 0.2.0 the kernel supplied `configloader.WithFilename` with `--config`'s value. It no longer imports `configloader`, so a program with `configloader.Provide` in `Options.Shared` still compiles, but `--config` no longer reaches the loader. Passing `--config` to that program fails before any app is built, naming the flag, so the missing migration shows up at once; without `--config`, the loader searches as it always did. Move the loader into `Options.Config` and pass the path as `configloader.Options.Filename`, as the example above does.
 
-From 0.2.1, the kernel requires `cli` 0.3.0, whose root no longer defines `--config`, so updating the kernel updates `cli` too. A command built straight from `cli.NewRootCommand` that read cli's `--config` defines its own flag.
+From 0.3.0, the kernel requires `cli` 0.3.0, whose root no longer defines `--config`, so updating the kernel updates `cli` too. A command built straight from `cli.NewRootCommand` that read cli's `--config` defines its own flag.
 
 #### How failures are reported
 

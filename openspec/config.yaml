@@ -86,9 +86,11 @@ context: |
   fx integration:
   - A package that owns state, runs work, or wires services exports an
     fx.Module variable named exactly Module. Utility packages, pure
-    function primitives and testing/<module>test doubles don't. The one
-    exception is config/configloader: its provider is generic over the
-    app's config type, so it's a function, Provide[T], not a variable.
+    function primitives and testing/<module>test doubles don't. The
+    exceptions: config/configloader, whose provider is generic over the
+    app's config type, so it's a function, Provide[T], not a variable;
+    and kernelrun and kernel, which build and run the app rather than
+    join its graph.
   - fx.Module names are the module's package name ("log",
     "configloader").
   - Every constructor registered with fx.Provide takes a single Params
@@ -149,7 +151,13 @@ context: |
     provides the implementation, and a separate ProvideRunner in
     runner.go, with a DefaultRunnerName constant, opts it in to
     running. Shared infrastructure lists the Module; only the commands
-    that need the loop list ProvideRunner.
+    that need the loop list ProvideRunner. It registers through
+    kernelrun.ProvideRunner under DefaultRunnerName.
+  - A loop module prepares in OnStart (binding a listener, opening a
+    subscription), serves in its runner until the runner's context is
+    cancelled, and releases in OnStop what OnStart acquired. A setup
+    failure is then a startup failure, and a finished Start means
+    ready.
   - A module doesn't import a sibling just to integrate with it. It
     exposes a value (a check func, a handler) and the consuming app
     wires the integration.
@@ -235,6 +243,8 @@ context: |
     (t.Context), package-level calls in the standard library's slog
     and log packages (an injected *slog.Logger), and key-value pairs in
     logging calls (typed attributes, through sloglint's attr-only).
+    fx.Shutdowner is banned too: kernelrun.Run never listens for it,
+    and returning from a runner already ends the app.
     wsl_v5 enforces the empty-line rule: its default
     checks plus empty lines after blocks, with nothing cuddled above a
     block. A defer sharing a variable with the line above is let back

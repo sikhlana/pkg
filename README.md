@@ -11,6 +11,7 @@ Each module gets a row here, in alphabetical order, as it lands. Import paths fo
 | [cli](./cli) | Cobra scaffolding for a program's main: signal handling, exit codes, root and version commands, build info |
 | [config/configloader](./config/configloader) | Loads the app's config struct from typed defaults, a config file and the environment, with _FILE secrets, then validates it |
 | [config/configvalidator](./config/configvalidator) | Validates a config struct with its validate tags and Validate methods, reporting every violation by config key |
+| [kernelrun](./kernelrun) | Runs an fx app's named runners between its start and stop: the first to return stops the rest, panics become crashes, and OnStop hooks see the outcome |
 | [log](./log) | Builds the app's slog logger from developer wiring: level, format, destination, pluggable text handlers and record middleware |
 
 ## Installation

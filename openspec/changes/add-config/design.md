@@ -25,7 +25,6 @@ Facts that shape the approach, checked against the libraries' sources:
 
 - **Changing how go-playground evaluates tags.** Element rules still need `dive`. The walk adds Validate calls inside slices and maps, not tag checks.
 - **Restricting the search to some formats.** The search stays as decided, trying every extension viper supports. Strict unknown keys catch most wrong-file pickups.
-- **Logging.** The loader returns errors and never logs, so it has no logger dependency.
 - **Viper versions without `BindEnv(key, name)` or `ConfigFileUsed`.** Both exist in the viper versions we'd require.
 
 ## Decisions
@@ -122,6 +121,7 @@ type Options[T any] struct {
     SearchPaths      []string // searched before the defaults
     Defaults         T        // typed defaults; the zero value means none
     AllowUnknownKeys bool
+    Logger           *slog.Logger // where loading is reported; nil discards (decision 17)
 }
 
 func Load[T any](o Options[T]) (T, error)
@@ -225,13 +225,15 @@ When unknown keys aren't allowed, decoding also uses `UnmarshalExact`, so a gap 
 func Provide[T any](o Options[T]) fx.Option  // fx.Module("configloader", fx.Provide(load))
 type Params struct {
     fx.In
-    Filename string `name:"configloader:filename" optional:"true"`
+    Filename string       `name:"configloader:filename" optional:"true"`
+    Logger   *slog.Logger `optional:"true"`
 }
 func AsFilename(v any) any                   // fx.Annotate(v, fx.ResultTags(...))
 func WithFilename(path string) fx.Option     // fx.Supply(AsFilename(path))
 ```
 
 - **Filename precedence:** the graph's filename, if supplied, then `o.Filename`, then the search.
+- **Logger precedence:** the graph's `*slog.Logger`, which `log.Module` provides, then `o.Logger`, then a discarding logger. It's the plain `*slog.Logger` type, untagged: the app has one logger, and a tag would make every app wire it by hand.
 - **No exported tag constant.** The constitution says callers never format tags, and `AsFilename` and `WithFilename` cover every way to supply one.
 - **No `Module` variable,** because a generic provider can't be one. That's the constitution exception in the proposal.
 
@@ -272,6 +274,34 @@ func WithFilename(path string) fx.Option     // fx.Supply(AsFilename(path))
 - **go-viper/mapstructure/v2 (`config/configloader`).** Viper's own decoder, required directly for the hooks and the scrubbed errors (decision 11).
 - **go.uber.org/fx (`config/configloader`).** For `Provide`. `config/configvalidator` doesn't import fx.
 - **testify (both).** Tests only.
+- **No logging dependency (`config/configloader`).** It logs through `log/slog`'s `*slog.Logger`, taken from the caller (decision 17).
+
+### 17. Logging through an injected `*slog.Logger` (→ docs/config.md)
+
+The loader reports where its values came from through a `*slog.Logger` it's given: `Options.Logger` standalone, or `Params.Logger` from the graph with fx, where `log.Module` provides one. Without one, records go to `slog.DiscardHandler`, so the loader works without `log`.
+
+**It doesn't import `log`.** The constitution has modules log through an injected `*slog.Logger` and integrate with a sibling through a value, never an import. `log/slog` is the standard library, so `configloader`'s `go.mod` gains nothing.
+
+**No dependency cycle.** `log.New` takes only developer wiring (debug, quiet, format, destination), never a Config. The logger therefore exists before the config is loaded, which is what `log`'s README promises.
+
+| When | Level | Message | Attributes |
+|------|-------|---------|------------|
+| A config file is read, given or found by the search | Info | loaded config file | path |
+| The search finds no file | Info | no config file found | searched (the directories) |
+| A key is set from its env variable | Debug | config key set from environment | key, env |
+| A key is read through its file variable | Debug | config key read from file | key, env, path |
+| A file key is ignored because unknown keys are allowed | Warn | ignoring unknown config key | key |
+
+- **Values never appear,** the same rule as for errors, since config holds secrets. Attributes name keys, env variables and paths.
+- **Failures aren't logged.** They're the returned error, and logging them too would report them twice; the caller decides what to do with an error.
+- **Attributes are typed** (`slog.String`), as the constitution and sloglint's attr-only require. The searched directories are a `[]string`, which has no typed constructor, so that one is `slog.Any`.
+- **The Info line answers the search's open question,** which file was actually read, on every start. The Warn line turns `AllowUnknownKeys` from silently ignoring typos into flagging them.
+- **No context parameter.** Loading happens before any request exists, and sloglint here doesn't require context-aware calls, so `Load` keeps its signature.
+
+Alternatives:
+- **Never logging,** the first draft's non-goal. Without a logger that could exist before the config, the loader would have needed a report value threaded back to the caller. `log` removed that problem.
+- **Importing `log` for its logger.** It would tie `configloader`'s releases to `log`'s, for a type the standard library already defines.
+- **A required logger under fx.** Every app would then need `log.Module`, or its own logger, just to load config.
 
 ## Risks / Trade-offs
 
@@ -320,6 +350,8 @@ What changed while applying the first pull request, and why.
 - **Open for the second pull request: `,remain`.** The loader must recognise a `,remain` field, which takes no env names and makes its level accept any key. The shared key rules don't cover it, so either the loader reads that tag option itself, or `config/configvalidator` gains a helper, which after `v0.1.0` means a 0.2.0 release first.
 
 - **Release steps left the task list.** Sections 8 and 18 (local `plan` and `check`, opening each pull request, the published release and a consumer check) were dropped, and the sections after 8 renumbered. A new constitution rule keeps steps outside the branch out of task lists, since an unticked one would hold the change back from archiving. The Migration Plan keeps the checks worth making.
+
+- **The loader logs.** Once `log/v0.1.0` shipped, with a logger that needs no config, the "never logs" non-goal became decision 17: the loader reports which file it read, which keys came from the environment, and which unknown keys it ignored, through an optional injected `*slog.Logger`. The loader spec gained a requirement, and tasks 10.1, 12.3 and 14 cover it.
 
 ## Fixes from code review
 

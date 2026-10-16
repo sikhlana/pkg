@@ -95,7 +95,7 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
 
 ## 8. Loader module scaffold
 
-- [ ] 8.1 Once `config/configvalidator/v0.1.0` is published, `git fetch`, then branch `add-configloader` off `origin/main`.
+- [x] 8.1 Once `config/configvalidator/v0.1.0` is published, `git fetch`, then branch `add-configloader` off `origin/main`.
 - [ ] 8.2 Create `config/configloader/`:
   - `go.mod` for `github.com/sikhlana/pkg/config/configloader`, with the go directive from `.go-version`;
   - package `configloader`, with tests in `configloader_test` (design decision 2);
@@ -120,10 +120,11 @@ Done first, because the design relies on these behaviours (design decision 15). 
 
 ## 10. Options, name and file
 
-- [ ] 10.1 `Options[T]` and the name rule (`ErrInvalidName`, prefix derivation), as in design decisions 5 and 8.
+- [ ] 10.1 `Options[T]`, including `Logger` (nil discards, design decision 17), and the name rule (`ErrInvalidName`, prefix derivation), as in design decisions 5 and 8.
 - [ ] 10.2 Finding the file, as in design decision 7:
   - an explicit path, with errors wrapped as `reading config file "<path>"`;
-  - the search over `SearchPaths`, `/etc/<name>`, `<home>/.<name>` (skipped when there's no home directory) and `.`, with errors naming `ConfigFileUsed()`.
+  - the search over `SearchPaths`, `/etc/<name>`, `<home>/.<name>` (skipped when there's no home directory) and `.`, with errors naming `ConfigFileUsed()`;
+  - an Info record naming the file read, or saying none was found with the directories searched (design decision 17).
 - [ ] 10.3 Tests for the spec requirements "The name sets the environment prefix", "An explicit config file must exist" and "Without one, a config file is searched for":
   - `my-svc` gives `MY_SVC_`, and an empty name and `../etc` both fail;
   - an explicit file that's missing (matching `fs.ErrNotExist`), malformed or of an unsupported format fails, naming the path;
@@ -138,7 +139,7 @@ Done first, because the design relies on these behaviours (design decision 15). 
   - map entries from the file's keys and from `Defaults`, recursing into the value type;
   - env names (uppercased, with characters other than ASCII letters, digits and `_` replaced by `_`);
   - one name map holding every name and its `_FILE` twin, failing with `ErrEnvNameCollision` and naming both keys.
-- [ ] 11.2 The unknown-key check from design decision 12: `ErrUnknownKeys` lists full keys, sorted. A level with a `,remain` field accepts any key. The check is skipped when `AllowUnknownKeys` is set.
+- [ ] 11.2 The unknown-key check from design decision 12: `ErrUnknownKeys` lists full keys, sorted. A level with a `,remain` field accepts any key. When `AllowUnknownKeys` is set, each unknown key is logged at Warn instead (design decision 17).
 - [ ] 11.3 Tests for the spec requirements "Env names never collide" and "Unknown keys in the file fail the load":
   - `tls.key` beside `tls.key_file`, `http.read_timeout` beside `http_read.timeout`, and map entries `acme-corp` beside `acme_corp` each fail, naming both keys;
   - a typo fails, naming `htpp.port`, and succeeds when unknown keys are allowed;
@@ -150,7 +151,8 @@ Done first, because the design relies on these behaviours (design decision 15). 
 - [ ] 12.2 The environment, as in design decision 9. For each table entry:
   - `X` and `X_FILE` both set fails with `ErrEnvAndFileSet`;
   - a `_FILE` read goes through a 1 MiB limit (`ErrSecretFileTooLarge`), trims trailing `\r` and `\n`, and goes in with `Set`;
-  - otherwise the entry is bound with `BindEnv(key, name)`.
+  - otherwise the entry is bound with `BindEnv(key, name)`;
+  - each key that's actually set from its variable, or read through its file variable, is logged at Debug with the key, the variable and any path, never the value (design decision 17).
   - No `AutomaticEnv`, env prefix or key replacer.
 - [ ] 12.3 Tests for the spec requirements "Defaults, then the file, then the environment", "Every key is settable from the environment", "Only known env names are read", "Secrets can come from files" and "Loading has no side effects":
   - precedence: default only, file over default, environment over file, a slice replaced, map entries merged;
@@ -172,23 +174,30 @@ Done first, because the design relies on these behaviours (design decision 15). 
 
 ## 14. fx wiring
 
-- [ ] 14.1 `Provide` (wrapped in `fx.Module("configloader", …)`), `Params`, `AsFilename` and `WithFilename`, as in design decision 13. The filename comes from the graph first, then `Options.Filename`, then the search.
+- [ ] 14.1 `Provide` (wrapped in `fx.Module("configloader", …)`), `Params`, `AsFilename` and `WithFilename`, as in design decision 13. The filename comes from the graph first, then `Options.Filename`, then the search. `Params.Logger` is an optional, untagged `*slog.Logger` that wins over `Options.Logger`.
 - [ ] 14.2 Tests under `fxtest.New` for the spec requirement "An fx app loads its config once, from the path it supplies":
   - a supplied path;
   - no path, with the search finding a file through `SearchPaths`;
   - a failed load failing the app's start;
   - a T embedding `fx.Out` providing each of its fields.
+- [ ] 14.3 Tests for the spec requirement "Loading is reported through the caller's logger", with a handler capturing records:
+  - one test per record in design decision 17's table, checking level, message and attributes;
+  - a value planted in the environment, the file and a `_FILE` variable never appears in any record;
+  - a failed load returns its error and logs nothing about it;
+  - no logger writes nothing;
+  - under `fxtest.New`, a supplied `*slog.Logger` receives the records.
 
 ## 15. Docs (second pull request)
 
 - [ ] 15.1 Write `config/configloader/README.md` in the constitution's order:
   - overview;
   - Configuration: none of its own, since it loads the app's, and why;
-  - Exported Members: every export, including the `Options` fields, `Params.Filename` and the sentinels;
+  - Exported Members: every export, including the `Options` fields, `Params.Filename`, `Params.Logger` and the sentinels;
   - Usage, Standalone: `Load` with defaults, the search, env names, `_FILE`, map entries, unknown keys, and the lowercased map keys;
-  - Usage, With fx: `Provide` with `cli`'s `--config` passed through `WithFilename`, and the `fx.Out` fan-out.
+  - Usage, With fx: `Provide` with `cli`'s `--config` passed through `WithFilename`, `log.Module` supplying the logger, and the `fx.Out` fan-out;
+  - what the loader logs, at which level, and that values never appear.
   - No backticks in table cells.
-- [ ] 15.2 Write `docs/config.md` from the design decisions marked "→ docs/config.md": why the module is split, the dispatch convention, layering with slice and map semantics, env naming and collisions, `_FILE` and rotation, and the `fx.Out` fan-out.
+- [ ] 15.2 Write `docs/config.md` from the design decisions marked "→ docs/config.md": why the module is split, the dispatch convention, layering with slice and map semantics, env naming and collisions, `_FILE` and rotation, the `fx.Out` fan-out, and what the loader logs.
 - [ ] 15.3 In the root `README.md`, add the `config/configloader` row to the Modules table, in alphabetical order.
 
 ## 16. Verification (second pull request)

@@ -236,6 +236,42 @@ A load SHALL NOT modify the process environment or any state shared with other l
 - **WHEN** a process loads two config types under two names
 - **THEN** each load sees only its own defaults, file and env names
 
+### Requirement: Loading is reported through the caller's logger
+
+The loader SHALL report through the logger it's given, or under fx through the app's logger when the app provides one. It SHALL report at Info which config file it read, or that the search found none, naming the directories it searched. It SHALL report at Debug each key set from its env variable or read through its file variable, naming the key, the variable and, for a file variable, the file's path. It SHALL report at Warn each unknown file key it ignores because unknown keys are allowed, naming the key. No record SHALL contain a config value or a secret file's contents. Failures SHALL be returned, not logged. Without a logger, the loader SHALL load the same way and report nothing.
+
+#### Scenario: File read
+- **WHEN** the search finds a config file
+- **THEN** an Info record names that file's path
+
+#### Scenario: No file found
+- **WHEN** the search finds no config file
+- **THEN** an Info record says so and names the directories searched
+
+#### Scenario: Key from the environment
+- **WHEN** `MY_SVC_HTTP_PORT` sets `http.port` to 9191
+- **THEN** a Debug record names `http.port` and `MY_SVC_HTTP_PORT`, and no record contains 9191
+
+#### Scenario: Key from a secret file
+- **WHEN** `db.password` is read through `MY_SVC_DB_PASSWORD_FILE`
+- **THEN** a Debug record names the key, the variable and the file's path, and no record contains the file's contents
+
+#### Scenario: Ignored unknown key
+- **WHEN** unknown keys are allowed and the file sets `htpp.port`
+- **THEN** a Warn record names `htpp.port`
+
+#### Scenario: Failure is returned, not logged
+- **WHEN** the loaded `http.port` fails its `min=1024` rule
+- **THEN** the violation is in the returned error, and no record mentions it
+
+#### Scenario: No logger
+- **WHEN** the caller gives no logger
+- **THEN** the load behaves the same and writes nothing
+
+#### Scenario: The fx app's logger
+- **WHEN** an fx app provides a `*slog.Logger` and loads its config through the loader's provider
+- **THEN** the loader reports through that logger
+
 ### Requirement: An fx app loads its config once, from the path it supplies
 
 Providing a config type to an fx app SHALL load it once, from the config file path the app supplies as developer wiring when it supplies one, and by searching otherwise. A failed load SHALL fail the app's start with the load error.

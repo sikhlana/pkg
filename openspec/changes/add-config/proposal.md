@@ -19,6 +19,7 @@
   - **Decoding** handles durations, comma-separated slices and any `encoding.TextUnmarshaler` (`slog.Level`, `netip.Prefix`, `time.Time`).
   - **Validation.** The loaded value goes through `config/configvalidator` before it's returned.
   - **fx.** A generic provider loads a type into the graph, and the config file path is developer wiring under a name tag, with `AsFilename` and `WithFilename`.
+  - **Logging.** It reports which file it read, which keys came from the environment, and which unknown keys it ignored, through an optional `*slog.Logger`: under fx, the one `log.Module` provides. Values never appear.
 - How it differs from go-modules' `configloader`:
   - Split in two; modules depend only on `config/configvalidator`.
   - Validate takes a pointer, checked at compile time, and reports every violation. The error type has `Key`, not `Field`, no built-in "validating configuration" prefix, and no nil-receiver tolerance.
@@ -51,6 +52,7 @@ None. `cli` keeps its `--config` contract, and `release-ci` runs its first sibli
 - **`config/configvalidator` (new module):** all of its exported API is new. Its exposure shape is plain functions, an interface and an error type. It has no fx Module, no Config and no runner.
 - **`config/configloader` (new module):** all of its exported API is new. Its exposure shape is a generic plain function that loads a type, and a generic fx option that provides it, with developer wiring for the file path. It has no `Module` variable (the constitution exception above), no Config of its own and no runner.
 - **`cli`:** unchanged. Apps pass its `--config` value to the loader.
+- **`log`:** unchanged. It provides the `*slog.Logger` the loader takes; the loader doesn't import it.
 - **`tools/release`:** unchanged, now exercised on a module that requires a sibling.
 - **New dependencies:**
   - `config/configvalidator`: go-playground/validator/v10.

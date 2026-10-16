@@ -23,6 +23,7 @@ Defaults are a value of the config type rather than a `func(*viper.Viper)`, so v
 - **A slice is replaced as a whole.** mapstructure decoding over a pre-filled slice keeps its elements and decodes each new one over the old one at its index, so a file's `hosts: [{name: x}]` over default hosts would inherit the first default's port.
 - **A map merges entry by entry.** Default `labels.team` survives a file that sets only `labels.zone`.
 - **A nil section stays nil.** Leaves under a nil pointer in the defaults get no default, so a section is only allocated when the file or the environment sets something in it.
+- **Defaults are copied.** Viper keeps what `SetDefault` is given, so the loader deep-copies each default first. Otherwise the loaded config would share maps and slices with `Options.Defaults`, and changing one would change every later load.
 
 ## Env names, bound one by one
 

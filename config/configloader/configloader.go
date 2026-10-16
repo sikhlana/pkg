@@ -14,25 +14,30 @@ import (
 	"github.com/sikhlana/pkg/config/configvalidator"
 )
 
-// ErrInvalidName is returned when Options.Name is empty or holds anything other than ASCII letters, digits, - and _.
+// ErrInvalidName is returned when Options.Name is empty, starts with a digit, or holds anything other than ASCII
+// letters, digits, - and _.
 var ErrInvalidName = errors.New("invalid name")
 
 // Options says where Load reads a config of type T from.
 type Options[T any] struct {
-	// Name names the application. It's required, and holds only ASCII letters, digits, - and _. The search looks in
-	// /etc/<name>/ and $HOME/.<name>/, and every env name starts with it, uppercased with - replaced by _.
+	// Name names the application. It's required, holds only ASCII letters, digits, - and _, and doesn't start with a
+	// digit, since no shell can export a variable that does. The search looks for .<name>.<ext> in the working directory
+	// and in directories named after it, and every env name starts with it, uppercased with - replaced by _.
 	Name string
 
-	// Filename is the config file to read, with its extension choosing the format. It must exist. Empty means search
-	// for a file named config instead, where finding none is fine.
+	// Filename is the config file to read, with its extension choosing the format. It must exist, and it's the only
+	// file read. Empty means search instead, where finding none is fine: config.<ext> in each of SearchPaths, then
+	// .<name>.<ext> in the working directory, then config.<ext> in $HOME/.config/<name>/, $HOME/.<name>/ and
+	// /etc/<name>/. The first file found is read, trying each format viper can decode.
 	Filename string
 
-	// SearchPaths are directories the search tries, in order, before /etc/<name>/, $HOME/.<name>/ and the working
-	// directory.
+	// SearchPaths are directories the search tries for config.<ext>, in order, before any other place.
 	SearchPaths []string
 
 	// Defaults holds the value of every key neither the file nor the environment sets. Leaves under a nil pointer get
-	// no default, and the zero value means no defaults.
+	// no default, and the zero value means no defaults. Map entries load with their names lowercased, as every key
+	// does, so a default entry named "Team" comes back as "team". Load copies what it takes from Defaults, so the
+	// loaded config shares nothing with it.
 	Defaults T
 
 	// AllowUnknownKeys makes Load ignore, and log at Warn, keys in the file that match no field, instead of failing
@@ -128,9 +133,10 @@ func newLoader(name string, logger *slog.Logger) (*loader, error) {
 	}, nil
 }
 
-// validName reports whether name is non-empty and holds only ASCII letters, digits, - and _.
+// validName reports whether name is non-empty, doesn't start with a digit, and holds only ASCII letters, digits, - and
+// _.
 func validName(name string) bool {
-	if name == "" {
+	if name == "" || name[0] >= '0' && name[0] <= '9' {
 		return false
 	}
 

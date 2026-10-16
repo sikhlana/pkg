@@ -118,19 +118,6 @@ func TestViperBindEnvReadsTheNameVerbatim(t *testing.T) {
 	assert.Equal(t, "localhost", cfg.HTTP.Host)
 }
 
-func TestViperConfigFileUsedNamesTheFileTheSearchFound(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-	require.NoError(t, os.WriteFile(path, []byte("port = 1\n"), 0o600))
-
-	v := viper.New()
-	v.SetConfigName("config")
-	v.AddConfigPath(dir)
-
-	require.NoError(t, v.ReadInConfig())
-	assert.Equal(t, path, v.ConfigFileUsed())
-}
-
 // readSpikeFile returns a fresh viper that has read contents as a YAML config file.
 func readSpikeFile(t *testing.T, contents string) *viper.Viper {
 	t.Helper()

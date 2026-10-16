@@ -249,3 +249,55 @@ func TestDefaultEntryIsNamedByItsTextForm(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[textKey]time.Duration{"read": 2 * time.Second, "write": time.Second}, cfg.Limits)
 }
+
+// labels is unexported, so a value reached through an embedded field of this type can't be read.
+type labels map[string]string
+
+func TestUnreadableDefaultFailsTheLoad(t *testing.T) {
+	isolate(t)
+
+	type config struct {
+		labels `mapstructure:",squash"`
+	}
+
+	_, err := configloader.Load(
+		configloader.Options[config]{Name: name, Defaults: config{labels: labels{"team": "core"}}},
+	)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "can't be read")
+}
+
+func TestDefaultEntryNamesLoadLowercased(t *testing.T) {
+	isolate(t)
+
+	cfg, err := configloader.Load(configloader.Options[testConfig]{
+		Name:     name,
+		Defaults: testConfig{Labels: map[string]string{"Team": "core"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"team": "core"}, cfg.Labels)
+}
+
+// env is a map key whose String method is for display, not the key a config file holds.
+type env string
+
+func (e env) String() string {
+	return "ENV(" + string(e) + ")"
+}
+
+func TestDefaultEntryIsNamedByItsKeyNotItsDisplay(t *testing.T) {
+	isolate(t)
+
+	type config struct {
+		DBs map[env]DBConfig `mapstructure:"dbs"`
+	}
+
+	t.Setenv("MY_SVC_DBS_PROD_HOST", "override.example.com")
+
+	cfg, err := configloader.Load(configloader.Options[config]{
+		Name:     name,
+		Defaults: config{DBs: map[env]DBConfig{"prod": {Host: "db.example.com"}}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "override.example.com", cfg.DBs["prod"].Host)
+}

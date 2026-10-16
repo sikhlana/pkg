@@ -116,7 +116,7 @@ Done first, because the design relies on these behaviours (design decision 15). 
   - `time.Time` and `netip.Prefix` defaults survive `SetDefault`;
   - `net.IP` decodes through the text hook when it runs before the weak-slice hook;
   - `BindEnv(key, name)` reads `name` verbatim, and without `AutomaticEnv` a section-named variable shadows nothing;
-  - `ConfigFileUsed` returns the path of the file the search found.
+  - `ConfigFileUsed` returns the path of the file the search found (later dropped: the loader searches itself, see Implementation Notes).
 
 ## 10. Options, name and file
 

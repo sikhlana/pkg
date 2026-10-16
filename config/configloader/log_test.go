@@ -61,7 +61,13 @@ func TestReportsThatNoFileWasFound(t *testing.T) {
 		Level:   slog.LevelInfo,
 		Message: "no config file found",
 		Attrs: map[string]any{
-			"searched": []string{dir, "/etc/my-svc", filepath.Join(home, ".my-svc"), "."},
+			"searched": []string{
+				filepath.Join(dir, "config.*"),
+				".my-svc.*",
+				filepath.Join(home, ".config", "my-svc", "config.*"),
+				filepath.Join(home, ".my-svc", "config.*"),
+				filepath.Join("/etc", "my-svc", "config.*"),
+			},
 		},
 	}}, records.all())
 }

@@ -3,6 +3,7 @@ package configloader
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
@@ -14,7 +15,7 @@ func (l *loader) decode(cfg any, allowUnknown bool) error {
 		scrubbed(mapstructure.StringToTimeDurationHookFunc()),
 		scrubbed(mapstructure.TextUnmarshallerHookFunc()),
 		// After the text hook, so a type such as net.IP, a []byte that decodes itself from text, isn't split on commas.
-		mapstructure.StringToWeakSliceHookFunc(","),
+		splitList,
 	))
 
 	if allowUnknown {
@@ -35,4 +36,27 @@ func scrubbed(hook mapstructure.DecodeHookFunc) mapstructure.DecodeHookFuncValue
 
 		return out, nil
 	}
+}
+
+// splitList turns a string headed for a slice into its comma-separated elements, each with the spaces around it
+// trimmed, so "a, b" loads as a and b. An empty string is an empty slice. A slice of bytes is left alone, so weak
+// decoding loads the string's bytes as they are: a key read through a _FILE variable, say.
+func splitList(from, to reflect.Type, data any) (any, error) {
+	if from.Kind() != reflect.String || to.Kind() != reflect.Slice || to.Elem().Kind() == reflect.Uint8 {
+		return data, nil
+	}
+
+	text := reflect.ValueOf(data).String()
+
+	if text == "" {
+		return []string{}, nil
+	}
+
+	elements := strings.Split(text, ",")
+
+	for i, element := range elements {
+		elements[i] = strings.TrimSpace(element)
+	}
+
+	return elements, nil
 }

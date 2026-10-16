@@ -341,3 +341,36 @@ func TestNullSectionInTheFileDoesntHideTheEnvironment(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 9191, cfg.HTTP.Port)
 }
+
+func TestLoadedConfigSharesNothingWithDefaults(t *testing.T) {
+	isolate(t)
+
+	type config struct {
+		Extra any              `mapstructure:"extra"`
+		Hosts []string         `mapstructure:"hosts"`
+		Tags  map[string][]int `mapstructure:"tags"`
+	}
+
+	o := configloader.Options[config]{
+		Name: name,
+		Defaults: config{
+			Extra: map[string]any{"a": []any{1}},
+			Hosts: []string{"a.example.com"},
+			Tags:  map[string][]int{"x": {1}},
+		},
+	}
+
+	first, err := configloader.Load(o)
+	require.NoError(t, err)
+
+	first.Extra.(map[string]any)["a"].([]any)[0] = 99
+	first.Hosts[0] = "changed.example.com"
+	first.Tags["x"][0] = 99
+
+	second, err := configloader.Load(o)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"a": []any{1}}, second.Extra)
+	assert.Equal(t, []string{"a.example.com"}, second.Hosts)
+	assert.Equal(t, map[string][]int{"x": {1}}, second.Tags)
+	assert.Equal(t, map[string]any{"a": []any{1}}, o.Defaults.Extra)
+}

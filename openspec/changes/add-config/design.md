@@ -24,8 +24,8 @@ Facts that shape the approach, checked against the libraries' sources:
 **Non-Goals:**
 
 - **Changing how go-playground evaluates tags.** Element rules still need `dive`. The walk adds Validate calls inside slices and maps, not tag checks.
-- **Restricting the search to some formats.** The search stays as decided, trying every extension viper supports. Strict unknown keys catch most wrong-file pickups.
-- **Viper versions without `BindEnv(key, name)` or `ConfigFileUsed`.** Both exist in the viper versions we'd require.
+- **Restricting the search to some formats.** The search tries every extension viper can decode. Strict unknown keys catch most wrong-file pickups.
+- **Viper versions without `BindEnv(key, name)` or `NewCodecRegistry`.** Both exist in the viper versions we'd require.
 
 ## Decisions
 
@@ -118,7 +118,7 @@ Alternatives:
 type Options[T any] struct {
     Name             string   // required; sets search directories and the env prefix
     Filename         string   // explicit config file; empty means search
-    SearchPaths      []string // searched before the defaults
+    SearchPaths      []string // searched for config.<ext> before any other place
     Defaults         T        // typed defaults; the zero value means none
     AllowUnknownKeys bool
     Logger           *slog.Logger // where loading is reported; nil discards (decision 17)
@@ -157,10 +157,18 @@ Alternatives:
 ### 7. Finding the file
 
 - **Explicit path:** `SetConfigFile(path)`. Viper picks the format from the extension. A missing, unreadable, malformed or unsupported file is wrapped as `reading config file "<path>": %w`, so `errors.Is(err, fs.ErrNotExist)` still works.
-- **Search:** `SetConfigName("config")`, then `AddConfigPath` for each directory in `SearchPaths`, `/etc/<name>`, `<home>/.<name>` and `.`, in that order. Viper tries every supported extension in each directory before moving to the next.
-  - `<home>` comes from `os.UserHomeDir`, and that directory is skipped when there's no home. That avoids viper expanding `$HOME` to `/.<name>`.
-  - `ConfigFileNotFoundError` means no file, which is fine.
-  - Any other error is wrapped with `ConfigFileUsed()`, the found file's real path. That fixes the original's `reading config file ""`.
+- **Search: our own loop over candidates, most specific first,** then `SetConfigFile` on the first file found, exactly as for an explicit path:
+  1. `config.<ext>` in each of `SearchPaths`;
+  2. `.<name>.<ext>` in the working directory;
+  3. `config.<ext>` in `<home>/.config/<name>`, `<home>/.<name>` and `/etc/<name>`.
+
+  Viper's own search looks for one file name across directories, so it can't look for `.<name>` in one place and `config` in the others. Each candidate is tried with every extension viper both supports and can decode, in viper's order, so a stray `config.ini` (no decoder since viper 1.21) never stops the search.
+  - **The working directory's file is named after the app,** so a project's unrelated `config.yaml` is never read. That also means it no longer has to come last: a project-local file overrides the user's, as `.golangci.yml` does.
+  - **The user's directories come before `/etc`,** since the first file found wins and a system-wide file shouldn't shadow a user's own.
+  - **`<home>` comes from `os.UserHomeDir`,** and both directories under it are skipped when there's no home. `$HOME/.config` is used literally, on macOS too, rather than `os.UserConfigDir()`, whose macOS answer is `~/Library/Application Support`.
+  - **A file the search can't check,** such as one in a directory it can't read, fails the load rather than being skipped. A path whose parent isn't a directory counts as absent.
+  - **Errors name the found file's path,** which fixes the original's `reading config file ""`.
+- **Parse failures keep no parser text.** Parsers quote what they choke on: JSON the offending character, dotenv the whole line, so a typo beside a secret would put the secret in the error. A `viper.ConfigParseError` becomes `ErrMalformedFile` with the format and, where the parser reports one, the position: go-toml's `Position()`, a JSON `SyntaxError` offset turned into a line and column, or the digits of a parser's `line N`. A format viper accepts but has no decoder for (viper 1.21 dropped `ini` and `hcl`, checked through `viper.NewCodecRegistry()`) says so instead of claiming the file is malformed.
 
 ### 8. The env table: leaves, map entries, names and collisions (→ docs/config.md)
 
@@ -198,16 +206,16 @@ Rotation is out of scope. A module that needs a rotating credential takes a `*_p
 
 The loader walks `Defaults` with the same leaf rules and calls `SetDefault(key, value)` for every leaf reachable through non-nil values: slices as a whole, map entries one by one, text-decoded values as they are.
 
-Viper resolves each key on its own, so a file's `hosts` replaces the default `hosts` entirely, and map entries merge entry by entry, as the spec requires. Leaves under a nil pointer get no default, so a nil section stays nil unless the file or the environment sets something in it. The zero `Defaults` sets only zero values, which is the same as having no defaults.
+Each default is deep-copied before `SetDefault`, since viper keeps what it's given and decoding hands maps and slices in `any` fields straight through: without the copy, the loaded config would share memory with `Options.Defaults`. Viper resolves each key on its own, so a file's `hosts` replaces the default `hosts` entirely, and map entries merge entry by entry, as the spec requires. Leaves under a nil pointer get no default, so a nil section stays nil unless the file or the environment sets something in it. The zero `Defaults` sets only zero values, which is the same as having no defaults.
 
 Alternative: decode file and env over a copy of `Defaults`. mapstructure truncates an existing slice to the input's length but reuses its elements by index, so a file's `hosts: [{name: x}]` over default `[{name: a, port: 1}, …]` would become `[{name: x, port: 1}]`, the default's port leaking into the file's host (a spike test pins this so the reason stays visible). Nil-pointer sections would also be pre-allocated by defaults that merely mention them.
 
 ### 11. Decoding hooks, in an order that matters
 
-`viper.DecodeHook(ComposeDecodeHookFunc(durationHook, textHook, weakSliceHook))`, keeping viper's `WeaklyTypedInput` so env strings decode into numbers and bools:
+`viper.DecodeHook(ComposeDecodeHookFunc(durationHook, textHook, splitList))`, keeping viper's `WeaklyTypedInput` so env strings decode into numbers and bools:
 - **`StringToTimeDurationHookFunc`.** `time.Duration` isn't a TextUnmarshaler.
 - **A text hook wrapping `TextUnmarshallerHookFunc`.** On error it returns `cannot parse value as <type>` and drops the underlying error, which may contain the input.
-- **`StringToWeakSliceHookFunc(",")`.**
+- **`splitList`, our own.** It splits a string headed for a slice on commas and trims the spaces around each element, so `a, b` loads as a and b. It leaves a `[]byte` alone, so weak decoding takes the string's bytes as they are. mapstructure's `StringToWeakSliceHookFunc` split `[]byte` too, which made a key from a `_FILE` secret impossible, and it didn't trim.
 
 The text hook must run before the slice hook. `net.IP` is a `[]byte` that implements `UnmarshalText`, and splitting it on commas first would break it.
 
@@ -274,6 +282,7 @@ func WithFilename(path string) fx.Option     // fx.Supply(AsFilename(path))
 - **go-viper/mapstructure/v2 (`config/configloader`).** Viper's own decoder, required directly for the hooks and the scrubbed errors (decision 11).
 - **go.uber.org/fx (`config/configloader`).** For `Provide`. `config/configvalidator` doesn't import fx.
 - **testify (both).** Tests only.
+- **pelletier/go-toml/v2 (`config/configloader`).** Already viper's TOML parser, now required directly so a parse failure's position can be read from its `DecodeError` instead of its message (decision 7). It adds nothing to the module graph.
 - **No logging dependency (`config/configloader`).** It logs through `log/slog`'s `*slog.Logger`, taken from the caller (decision 17).
 
 ### 17. Logging through an injected `*slog.Logger` (→ docs/config.md)
@@ -310,7 +319,7 @@ Alternatives:
 - **[Keys compose only through direct returns and joins.]** → Godoc and docs give the rule, and a test shows the opaque case.
 - **[`ValidateField` panics when its field isn't beneath its parent.]** → It's a programming error in one mode's branch, found by the first test that exercises that mode.
 - **[A Validate method is skipped while tags fail in its branch, so semantic errors can surface one run later.]** → Accepted. Tags catch the shape errors that would make the method's report misleading.
-- **[The search may pick up any supported extension, `config.env` or `config.ini` included.]** → Accepted with search. Strict unknown keys turn most wrong-file pickups into errors.
+- **[The search tries every format viper decodes in each place, `config.env` included.]** → A file only counts when it's named for the place: `config` in a directory of the app's own, `.<name>` in the working directory. Strict unknown keys turn most wrong-file pickups into errors.
 - **[Viper lowercases map keys.]** → Documented, and pinned by a test so a viper change is noticed.
 - **[Map-entry collisions come from operator content and fail at deploy time, not in tests.]** → The error names both keys.
 - **[A mapstructure regression could put values back into error messages.]** → The minimum version is pinned, and tests assert a planted value never appears.
@@ -360,6 +369,8 @@ What changed while applying the first pull request, and why.
 - **Keys are lowercased in the table,** as viper stores them, so an untagged field's key is its Go name lowercased in env names, log records and unknown-key errors. Validation errors still use the Go name, as `config/configvalidator` writes it.
 - **docs/config.md points at the change directory** (`openspec/changes`) rather than a file path, since archiving moves the design. Repoint it at the archived design.md when archiving.
 
+- **The search looks for app-named files, most specific place first** (decision 7). At the user's request, after the second review: `.<name>.<ext>` in the working directory, and `config.<ext>` in `$HOME/.config/<name>/`, `$HOME/.<name>/` and `/etc/<name>/`, in that order after `SearchPaths`. Viper's search couldn't express a different file name per place, so the loader searches itself, and the spike pinning `ConfigFileUsed` after viper's search was dropped.
+
 ## Fixes from code review
 
 The review of `add-configvalidator` at bc73835 found fifteen issues. All are fixed, each with a regression test, and the spec, README and decisions 3 and 4 above were updated to match.
@@ -396,3 +407,16 @@ The review of `add-configloader` found these: two from reading the diff, the res
 - **Default map keys differing only in case gave a random result,** since both lowercase to one key and map iteration order picked the survivor. → They fail with `ErrEnvNameCollision`. Default entries are now named by their key's text form, as `config/configvalidator` names entries, rather than by `fmt.Sprint`, which a `String` method could change.
 - **A default map entry named `""` or holding a dot broke decoding,** since viper reads a dot as nesting and an empty entry replaces the whole map. → `Load` rejects it. Entries from the file have the same viper limitation, now documented.
 - **Documented, not changed:** mapstructure always allocates a squashed pointer embed, so a nil section stays nil only when it isn't squashed; and names that normalise alike (`my-svc`, `my_svc`) share an env prefix.
+
+A second review, of `ef32d45`, found eight more. Each is fixed with a regression test, and the spec and README were updated where behaviour changed.
+
+- **A plain `[]byte` field couldn't load from a string.** mapstructure's weak-slice hook split it on commas, then failed to decode each piece as a byte. → `splitList` leaves byte slices to weak decoding (decision 11).
+- **Parse errors quoted the file.** JSON's error quoted the offending character, and dotenv's quoted the whole line. → `ErrMalformedFile` with the format and position only (decision 7).
+- **The loaded config shared memory with `Options.Defaults`.** A map or slice reached through an `any` field went to viper, and from there into the result, by reference. → Defaults are deep-copied before `SetDefault` (decision 10).
+- **Comma-separated elements kept their spaces.** `a, b` loaded as `a` and ` b`. → `splitList` trims each element.
+- **A name could start with a digit,** giving env names no shell can export. → `ErrInvalidName`, and the spec's name rule says so.
+- **Mixed-case default map keys came back lowercased** without the docs saying so. → Documented in the README and `Options.Defaults`; it's viper's key lowercasing.
+- **An unreadable default was skipped without an error.** Reaching it actually panicked first, in `entryName`, on a map key read through an unexported embedded field. → `entryName` doesn't assert on a key it can't read, and an unreadable default fails the table build.
+- **`walkEntries` repeated a root-key special case.** → The prefix is computed once.
+- **Found while fixing:** the loader's `entryName` fell back to `fmt.Sprint`, so a key type with a display-only `String` method was named differently from `configvalidator`'s keys. → It follows `configvalidator`'s rule: text form, then underlying value. The two copies stay in step by hand until `configvalidator` exports the rule, which would need its own minor release first.
+

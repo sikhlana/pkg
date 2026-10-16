@@ -12,10 +12,10 @@ None of its own. `configloader` loads the app's Config; what it reads that Confi
 |------|-------------|
 | Load | Reads a T from the defaults, then the config file, then the environment, and validates it. Returns the zero T and an error on any failure. |
 | Options | Says where Load reads a T from. Generic over the config type, so T is inferred from the literal. |
-| Options.Name | Required. Sets the search directories and the env prefix. Only ASCII letters, digits, - and _. |
-| Options.Filename | The config file to read, which must exist. Empty means search. |
-| Options.SearchPaths | Directories searched, in order, before /etc/name, $HOME/.name and the working directory. |
-| Options.Defaults | A T holding the value of every key neither the file nor the environment sets. The zero value means none. |
+| Options.Name | Required. Sets the search directories and the env prefix. Only ASCII letters, digits, - and _, and not starting with a digit. |
+| Options.Filename | The config file to read, which must exist. It's the only file read. Empty means search. |
+| Options.SearchPaths | Directories searched for config.ext, in order, before any other place. |
+| Options.Defaults | A T holding the value of every key neither the file nor the environment sets. The zero value means none. Load copies what it takes, so the loaded config shares nothing with it. |
 | Options.AllowUnknownKeys | Ignores, and logs at Warn, file keys that match no field, instead of failing with ErrUnknownKeys. |
 | Options.Logger | Where loading is reported. Nil reports nothing. |
 | Provide | An fx option that loads a T once, with Load, and provides it. A T embedding fx.Out provides each of its fields instead. |
@@ -24,8 +24,9 @@ None of its own. `configloader` loads the app's Config; what it reads that Confi
 | Params.Logger | The app's *slog.Logger, optional. Wins over Options.Logger. |
 | AsFilename | Annotates a string, or a constructor returning one, as the config file Provide reads. Wrap it in fx.Supply or fx.Provide. |
 | WithFilename | Supplies the config file Provide reads, such as cli's --config value. |
-| ErrInvalidName | Options.Name is empty or holds a character other than ASCII letters, digits, - and _. |
+| ErrInvalidName | Options.Name is empty, starts with a digit, or holds a character other than ASCII letters, digits, - and _. |
 | ErrEnvNameCollision | Two keys would share an env name, or one key's env name is another's _FILE name. Names both keys. |
+| ErrMalformedFile | The config file can't be parsed. Names the file, its format and the position the parser reports, never the parser's message. |
 | ErrUnknownKeys | The file sets keys that match no field. Lists them all, in full and sorted. |
 | ErrEnvAndFileSet | Both a key's env variable and its _FILE variable are non-empty. Names both variables. |
 | ErrSecretFileTooLarge | A _FILE variable names a file larger than 1 MiB. Names the variable and the path, never the contents. |
@@ -71,13 +72,21 @@ if err != nil {
 
 #### Layers
 
-Each layer overrides the one before for the keys it sets: `Defaults`, then the config file, then the environment. A key no layer sets keeps its zero value. A slice is replaced as a whole by the highest layer that sets it, so a file's `hosts: [x]` replaces default hosts `a, b, c` rather than merging with them. A map merges entry by entry, so default `labels.team` survives a file that sets only `labels.zone`. Leaves under a nil pointer in `Defaults` get no default, so a nil section stays nil unless the file or the environment sets something in it. The exception is a squashed pointer embed, which mapstructure always allocates. An unexported embedded pointer can't be decoded at all, so `Load` rejects a config type that squashes one.
+Each layer overrides the one before for the keys it sets: `Defaults`, then the config file, then the environment. A key no layer sets keeps its zero value. A slice is replaced as a whole by the highest layer that sets it, so a file's `hosts: [x]` replaces default hosts `a, b, c` rather than merging with them. A map merges entry by entry, so default `labels.team` survives a file that sets only `labels.zone`. `Load` copies each default it takes, so changing the loaded config never changes `Defaults`, and a reused `Options` loads the same every time. Leaves under a nil pointer in `Defaults` get no default, so a nil section stays nil unless the file or the environment sets something in it. The exception is a squashed pointer embed, which mapstructure always allocates. An unexported embedded pointer can't be decoded at all, so `Load` rejects a config type that squashes one.
 
 #### The config file
 
 An explicit `Filename` must exist, and its extension chooses the format. Errors name the path, and a missing file matches `fs.ErrNotExist`.
 
-Without one, `Load` searches for a file named `config`, with any extension viper supports (`config.yaml`, `config.toml`, `config.json` and so on), in each directory of `SearchPaths`, then `/etc/my-svc/`, `$HOME/.my-svc/` and the working directory, and reads the first it finds. Finding none is fine: the config then comes from the defaults and the environment. A file it finds but can't parse fails the load, naming its full path.
+A file that can't be parsed fails with `ErrMalformedFile`, naming its format and, where the parser reports one, the position: `malformed config file: toml syntax error at line 3, column 9`. The parser's own message is dropped, since parsers quote the offending text, and a typo beside a secret would put the secret in the error. A file whose extension viper accepts but can't decode, such as `config.ini`, fails saying so.
+
+Without one, `Load` searches, most specific place first, and reads the first file it finds:
+
+1. `config.<ext>` in each directory of `SearchPaths`, in order;
+2. `.my-svc.<ext>` in the working directory;
+3. `config.<ext>` in `$HOME/.config/my-svc/`, then `$HOME/.my-svc/`, then `/etc/my-svc/`.
+
+`<ext>` is any format viper can decode, such as `yaml`, `toml` or `json`, tried in turn in each place. A file in a format it can't decode, such as `config.ini`, is passed over. The working directory's file is named after the app, so a project's unrelated `config.yaml` is never picked up. Finding none is fine: the config then comes from the defaults and the environment. A file it finds but can't parse fails the load the same way, naming its full path.
 
 #### Environment
 
@@ -89,7 +98,7 @@ Only those names, and their `_FILE` twins, are read. A variable named after a se
 
 Two keys that would share an env name fail the load with `ErrEnvNameCollision`, naming both: `http.read_timeout` beside `http_read.timeout`, or `tls.key` beside `tls.key_file`, whose env name is `tls.key`'s `_FILE` twin. Name a module's own path fields `*_path` instead.
 
-Values decode by type wherever they come from: `30s` into a `time.Duration`, `a,b` into a slice, and a text-decoded type from its text form. A value that fails to decode fails the load, naming the key and the type, never the value.
+Values decode by type wherever they come from: `30s` into a `time.Duration`, `a, b` into a slice with the spaces around each element trimmed, and a text-decoded type from its text form. A `[]byte` takes the string's bytes as they are, commas included, so a key can come from a `_FILE` secret. A value that fails to decode fails the load, naming the key and the type, never the value.
 
 #### Secrets from files
 
@@ -101,7 +110,7 @@ The file isn't re-read, so a credential that rotates while the program runs belo
 
 A map field's entries come from the file and the defaults. Each entry's leaves get env names under the map's key and the entry's, so `MY_SVC_DATABASES_REPORTING_PASSWORD` sets the password of a `reporting` entry the file defines, even when the file's entry sets only `host`. An entry neither the file nor the defaults define can't be created from the environment.
 
-Viper lowercases keys, so map entries come back lowercased: a file's `databases.Reporting` loads as `databases["reporting"]`. Entries whose names normalise to the same env name, such as `acme-corp` and `acme_corp`, fail with `ErrEnvNameCollision`, and so do default entries that differ only in case. A default entry is named by its key's text form when its type has one. An entry name can't hold a dot, which viper reads as nesting, or be empty, so `Load` rejects such a default entry.
+Viper lowercases keys, so map entries come back lowercased, the default ones too: a file's `databases.Reporting` loads as `databases["reporting"]`, and so does a default entry named `Reporting`. Entries whose names normalise to the same env name, such as `acme-corp` and `acme_corp`, fail with `ErrEnvNameCollision`, and so do default entries that differ only in case. A default entry is named by its key's text form when its type has one, and otherwise by its underlying value, never by a `String` method written for display, as `configvalidator` names entries. An entry name can't hold a dot, which viper reads as nesting, or be empty, so `Load` rejects such a default entry.
 
 A config type that contains itself, such as a linked node with a `*Node` field, loads from the file, but only its first level gets env names.
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/sikhlana/pkg/config/configvalidator"
@@ -14,6 +15,8 @@ import (
 
 // fileSuffix ends the name of the env variable that names a file holding a key's value.
 const fileSuffix = "_FILE"
+
+var textMarshaler = reflect.TypeFor[encoding.TextMarshaler]()
 
 var (
 	// ErrEnvNameCollision is returned when two keys would share an env name, or one key's env name is another's
@@ -254,14 +257,14 @@ func (b *tableBuilder) walkEntries(t reflect.Type, def reflect.Value, key string
 		names = append(names, name)
 	}
 
+	prefix := key + "."
+
+	if key == "" {
+		prefix = ""
+	}
+
 	for _, fileKey := range b.fileKeys {
-		rest, ok := strings.CutPrefix(fileKey, key+".")
-
-		if key == "" {
-			rest, ok = fileKey, true
-		}
-
-		if ok {
+		if rest, ok := strings.CutPrefix(fileKey, prefix); ok {
 			name, _, _ := strings.Cut(rest, ".")
 			names = append(names, name)
 		}
@@ -289,6 +292,12 @@ func (b *tableBuilder) addLeaf(t reflect.Type, def reflect.Value, key string) {
 
 	if def.IsValid() && (def.Kind() == reflect.Pointer || def.Kind() == reflect.Interface) && def.IsNil() {
 		def = reflect.Value{}
+	}
+
+	if def.IsValid() && !def.CanInterface() {
+		b.fail(fmt.Errorf("default for %s: a value reached through an unexported field can't be read", key))
+
+		return
 	}
 
 	b.leaves = append(b.leaves, leaf{
@@ -340,14 +349,34 @@ func elem(v reflect.Value) reflect.Value {
 	return v.Elem()
 }
 
-// entryName returns the name a config file gives map key k: its text form when its type has one, as
-// config/configvalidator names entries, and otherwise its value.
+// entryName returns the name a config file gives map key k, by config/configvalidator's rule: its text form when its
+// type has one, and otherwise its underlying value, so a String method written for display can't stand in for the key
+// the operator wrote. A key reached through an unexported field is named by its underlying value.
 func entryName(k reflect.Value) string {
-	if marshaler, ok := reflect.TypeAssert[encoding.TextMarshaler](k); ok {
+	if k.Kind() == reflect.Interface && !k.IsNil() {
+		return entryName(k.Elem())
+	}
+
+	if k.CanInterface() && k.Type().Implements(textMarshaler) {
+		marshaler, _ := reflect.TypeAssert[encoding.TextMarshaler](k)
+
 		if text, err := marshaler.MarshalText(); err == nil {
 			return string(text)
 		}
 	}
 
-	return fmt.Sprint(k)
+	switch k.Kind() { //nolint:exhaustive // Every other kind is written in its default format.
+	case reflect.String:
+		return k.String()
+	case reflect.Bool:
+		return strconv.FormatBool(k.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(k.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return strconv.FormatUint(k.Uint(), 10)
+	case reflect.Float32, reflect.Float64:
+		return strconv.FormatFloat(k.Float(), 'g', -1, k.Type().Bits())
+	default:
+		return fmt.Sprint(k)
+	}
 }

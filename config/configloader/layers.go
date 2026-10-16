@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"reflect"
 	"strings"
 )
 
@@ -23,12 +24,89 @@ var (
 )
 
 // setDefaults sets every leaf's default that Options.Defaults reaches, one key at a time, so a higher layer replaces
-// a slice as a whole and map entries merge entry by entry.
+// a slice as a whole and map entries merge entry by entry. Each default is copied first, so the loaded config never
+// shares a map, slice or pointer with Options.Defaults.
 func (l *loader) setDefaults(t *table) {
 	for _, leaf := range t.leaves {
-		if leaf.def.IsValid() && leaf.def.CanInterface() {
-			l.v.SetDefault(leaf.key, leaf.def.Interface())
+		if leaf.def.IsValid() {
+			l.v.SetDefault(leaf.key, deepCopy(leaf.def).Interface())
 		}
+	}
+}
+
+// deepCopy returns a copy of v that shares no map, slice, pointer or interface value with it. A struct's unexported
+// fields are copied as they are, since they can't be set through reflection.
+func deepCopy(v reflect.Value) reflect.Value {
+	switch v.Kind() { //nolint:exhaustive // Every other kind holds no reference and copies by value.
+	case reflect.Pointer:
+		if v.IsNil() {
+			return v
+		}
+
+		c := reflect.New(v.Type().Elem())
+
+		c.Elem().Set(deepCopy(v.Elem()))
+
+		return c
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+
+		c := reflect.New(v.Type()).Elem()
+
+		c.Set(deepCopy(v.Elem()))
+
+		return c
+	case reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+
+		c := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+
+		copyElements(c, v)
+
+		return c
+	case reflect.Array:
+		c := reflect.New(v.Type()).Elem()
+
+		copyElements(c, v)
+
+		return c
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+
+		c := reflect.MakeMapWithSize(v.Type(), v.Len())
+
+		for k, e := range v.Seq2() {
+			c.SetMapIndex(k, deepCopy(e))
+		}
+
+		return c
+	case reflect.Struct:
+		c := reflect.New(v.Type()).Elem()
+
+		c.Set(v)
+
+		for i := range v.NumField() {
+			if c.Field(i).CanSet() {
+				c.Field(i).Set(deepCopy(v.Field(i)))
+			}
+		}
+
+		return c
+	default:
+		return v
+	}
+}
+
+// copyElements sets each element of c, a slice or array as long as v, to a deep copy of v's.
+func copyElements(c, v reflect.Value) {
+	for i := range v.Len() {
+		c.Index(i).Set(deepCopy(v.Index(i)))
 	}
 }
 

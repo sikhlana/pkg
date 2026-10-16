@@ -1,3 +1,6 @@
 go 1.27
 
-use ./cli
+use (
+	./cli
+	./config/configvalidator
+)

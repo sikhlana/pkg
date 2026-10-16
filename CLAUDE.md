@@ -16,7 +16,7 @@ A personal library of reusable Go modules, wired through [Uber fx](https://uber-
 
 ## Making a change
 
-Changes go through OpenSpec: `/opsx:propose`, then `/opsx:apply`, `/opsx:verify` and `/opsx:archive`. Use `/opsx:explore` to think something through first. OpenSpec injects the constitution into every artifact, and its `rules` block says what each proposal, design, task list and spec must contain.
+Changes go through OpenSpec: `/opsx:propose`, then `/opsx:apply`, `/opsx:verify` and `/opsx:archive`. Use `/opsx:explore` to think something through first. Lint config, workflow plumbing and doc tweaks that change no behaviour a spec describes skip OpenSpec and go straight to a pull request. OpenSpec injects the constitution into every artifact, and its `rules` block says what each proposal, design, task list and spec must contain.
 
 ## Build and test
 

@@ -38,7 +38,6 @@ type Proxy struct {
 // up after the timeout.
 func (p Proxy) Announce(ctx context.Context, path, version string) error {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout())
-
 	defer cancel()
 
 	escapedPath, err := module.EscapePath(path)

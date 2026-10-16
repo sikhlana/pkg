@@ -86,7 +86,6 @@ func (r Runner) Run(ctx context.Context, dir, base string) (Result, error) {
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
-
 	defer cancel()
 
 	var output bytes.Buffer

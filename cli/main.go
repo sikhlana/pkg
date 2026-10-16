@@ -23,7 +23,6 @@ func Main(root CommandFunc) {
 // run is Main without the exit. os.Exit skips deferred calls, so stop has to run here, before Main exits.
 func run(root CommandFunc) int {
 	ctx, stop := SignalContext(context.Background())
-
 	defer stop()
 
 	return Execute(ctx, root())

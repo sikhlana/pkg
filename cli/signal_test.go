@@ -24,7 +24,6 @@ const signalChildEnv = "CLI_TEST_SIGNAL_CHILD"
 
 func TestSignalContextStartsLive(t *testing.T) {
 	ctx, stop := cli.SignalContext(t.Context())
-
 	defer stop()
 
 	assert.NoError(t, ctx.Err())
@@ -34,7 +33,6 @@ func TestSignalContextFirstSignalCancels(t *testing.T) {
 	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
 			ctx, stop := cli.SignalContext(t.Context())
-
 			defer stop()
 
 			require.NoError(t, syscall.Kill(os.Getpid(), sig))
@@ -59,7 +57,6 @@ func TestSignalContextParentCancels(t *testing.T) {
 	parent, cancel := context.WithCancel(t.Context())
 
 	ctx, stop := cli.SignalContext(parent)
-
 	defer stop()
 
 	cancel()
@@ -161,7 +158,6 @@ func runSignalChild(t *testing.T) {
 	t.Helper()
 
 	ctx, stop := cli.SignalContext(t.Context())
-
 	defer stop()
 
 	fmt.Println("ready")

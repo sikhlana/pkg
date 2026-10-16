@@ -79,8 +79,30 @@ Alternative rejected: marking releases as prereleases, which hides the badge but
 
 Rollback: delete the workflow and the required check, and revert the constitution section. Nothing depends on the format.
 
+## What actually happened
+
+No decision changed during implementation. Two things read differently now:
+
+- **The scope rule moved on later.** #7 shipped decision 2 as designed, scoping by directory (`http/server`). add-configvalidator (#10) then changed the constitution to scope by package name (`httpserver`), since a nested module's package name is its identity everywhere except its path and tag. The constitution is the current rule.
+- **The required checks live in a ruleset.** This design says "branch protection", but main has none. The ruleset add-release-ci created gained `PR title` beside `CI OK`, and was renamed "ci-ok + pr-title".
+
+Rollout, verified:
+- PR #7's own title passed `PR title` on its first run. Retitled free-form, the check failed without a new commit; restored, it passed (tasks 5.3 and 5.4).
+- Through the API: squash merges take `PR_TITLE` and `PR_BODY`, and the ruleset requires `CI OK` and `PR title`, both from GitHub Actions.
+- e5f7bd6, #7's squash commit, has the PR title plus ` (#7)` as its subject. Its body is the PR body word for word, rewrapped at 72 columns, with the branch's `Co-authored-by` trailer appended after a `---------` line.
+- #8, #9 and #10 merged with conventional titles.
+
+Follow-ups left open:
+- **Task 6.4, Dependabot's titles.** No Dependabot PR has opened since the merge. If the first one keeps "Bump" capitalised, the title check fails it, and the Risks entry above has the fix.
+- **"Branch protection" in workflow comments.** `ci.yaml` and `pr-title.yaml` still use it loosely for the ruleset. Harmless, but "ruleset" would be exact.
+
+## Fixed at archive
+
+- **"Pull request results are reported in one place" contradicted the new requirement.** It promised a single overall status that fails when any CI job fails, but the title check is a second required status that CI OK doesn't include. The delta gained a MODIFIED entry: the module jobs roll up into one status, the title check reports as its own, and a "Title edited" scenario says an edit re-runs only the title check. The proposal's capability list says so too.
+
 ## Rollup at archive
 
-- docs/release.md gets decisions 3 and 6 in this change, not at archive.
-- The constitution holds decision 2.
-- Nothing else is cross-module.
+Done:
+- docs/release.md gained decisions 3 and 6 in the change itself, with decision 4's separate check under CI layout. At archive, its "Branch protection requires CI OK" became the default branch's ruleset.
+- The constitution holds decision 2, as since amended.
+- Decisions 1 and 5 live where they apply: the constitution and `pr-title.yaml`'s header comment for the squash title, and `dependabot.yaml`'s comments for the prefixes.

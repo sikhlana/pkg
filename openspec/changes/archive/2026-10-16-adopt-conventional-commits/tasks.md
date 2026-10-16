@@ -34,7 +34,7 @@ No library module is touched, so there are no VERSION bump, module README or go 
 
 ## 6. Rollout
 
-- [ ] 6.1 You set squash merges to use the PR title and PR body (`squash_merge_commit_title=PR_TITLE`, `squash_merge_commit_message=PR_BODY`), confirmed through the API.
-- [ ] 6.2 You add `PR title` to main's required status checks next to CI OK, confirmed through the API.
-- [ ] 6.3 After merge, `main`'s new commit subject is the PR title, and its body is the PR body.
+- [x] 6.1 You set squash merges to use the PR title and PR body (`squash_merge_commit_title=PR_TITLE`, `squash_merge_commit_message=PR_BODY`), confirmed through the API. (Both read back as set, with squash still the only merge method.)
+- [x] 6.2 You add `PR title` to main's required status checks next to CI OK, confirmed through the API. (Through a ruleset, not classic branch protection, which main doesn't have: "ci-ok + pr-title" requires `CI OK` and `PR title`, both from GitHub Actions, with strict checks and the deletion and non-fast-forward rules.)
+- [x] 6.3 After merge, `main`'s new commit subject is the PR title, and its body is the PR body. (e5f7bd6's subject is the PR title plus GitHub's ` (#7)`. Its body matches the PR body word for word; GitHub rewrapped it at 72 columns and appended the branch's `Co-authored-by` trailer after a `---------` line.)
 - [ ] 6.4 The next Dependabot PR is titled `build(deps): …` or `ci(deps): …` and passes `PR title`. If Dependabot keeps "Bump" capitalised, follow the Risks entry in design.md.

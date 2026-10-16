@@ -34,6 +34,7 @@ None.
 
 - `release-ci`:
   - a new requirement that pull request titles follow Conventional Commits;
+  - "Pull request results are reported in one place" rolls up the module jobs only, with the title check as its own status (added at archive);
   - "Releases describe only their own module" no longer claims releases are never marked latest.
 
 ## Impact

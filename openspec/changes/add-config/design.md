@@ -70,12 +70,14 @@ The walk starts from the `*T` it's given, so the root is addressable. At each va
 1. A nil pointer stops the walk.
 2. A field tagged `validate:"-"` is never entered (decision 1's tag lookup, applied to the `validate` tag).
 3. A text-decoded value is a single value: if it's a Validator it's called, and either way the walk stops there.
-4. A Validator, through either the value or its address, is called, unless a tag violation's key equals its key or extends it past `.` or `[`. Either way the walk stops there.
-5. Otherwise the walk descends into exported struct fields, slice and array elements (`key[i]`), map values (`key.<entry>`) and non-nil interface values (at the same key), as go-playground's tag pass does.
+4. A Validator, through either the value or its address, is called, unless a tag violation's path lies at or beneath its own. Either way the walk stops there. A struct whose Validate method may be promoted from a nil embedded pointer or interface isn't a Validator: that section is missing, and the walk carries on into its fields.
+5. Otherwise the walk descends into exported and embedded struct fields (an unexported embedded struct too, since its exported fields are promoted), slice and array elements (`key[i]`), map values (`key.<entry>`) and non-nil interface values (at the same key), as go-playground's tag pass does. A slice, array or map whose element type can't be or hold a Validator, such as `[]byte`, is passed over without visiting each element.
+
+**Paths, not strings.** Positions are kept as lists of segments, one each for a field, a squashed field, an index or an entry, until a violation's `Key` is written. Suppression compares segments, so an entry named `acme.eu` never counts as beneath `acme`. A squashed field has a segment that writes nothing, so its branch stays apart from its siblings'. An entry is written after a dot whatever it holds, and named by its key's text form or underlying value, not by a `String` method. An `*Error` built by the validator carries its path unexported, so it joins a parent's key without `Key` being parsed. A user-built `*Error` has only `Key`, which joins as written, after a dot unless it starts with `[`.
 
 Map values and interface contents aren't addressable, so each is copied into a new addressable value before the Validator check, which lets pointer-receiver methods be found.
 
-Skipping a Validator whose branch failed its tags (rule 4) keeps "report everything" from calling methods on data their own tags rejected, such as an unknown mode. It over-suppresses slightly around squashed embeds: a squashed struct shares its parent's key, so a sibling's tag failure under that key also suppresses it. Accepted, since squashed embeds rarely carry their own Validate.
+Skipping a Validator whose branch failed its tags (rule 4) keeps "report everything" from calling methods on data their own tags rejected, such as an unknown mode.
 
 Alternatives:
 - **Fail-fast like the original.** It's simpler, but every violation costs a redeploy.
@@ -87,8 +89,9 @@ Each violation is an `*Error{Key, Err}` with pointer receivers. `Error()` return
 
 When the walk wraps what a Validator returned, at key K:
 - an `*Error` at the top becomes a new `*Error` with key `K.<its key>`; the original is never mutated;
-- a joined error is unwrapped through `Unwrap() []error`, and each part is wrapped the same way;
-- anything else becomes `*Error{Key: K, Err: err}`.
+- an `Errors`, or the type `errors.Join` returns, is split, and each part is wrapped the same way;
+- a nil `*Error` is no violation;
+- anything else becomes `*Error{Key: K, Err: err}`, including an error with an `Unwrap() []error` method of another type, such as `fmt.Errorf` with several `%w` verbs, whose text says more than its parts.
 
 A keyed error buried under `fmt.Errorf("context: %w", …)` is opaque: the context text survives, and the key stops at K. The original composed through any wrapping with `errors.As`, which silently dropped the wrapper's text.
 
@@ -98,7 +101,7 @@ A keyed error buried under `fmt.Errorf("context: %w", …)` is opaque: the conte
 func ValidateField[P, F any](parent *P, field *F) error
 ```
 
-It finds `field` beneath `parent` by address, through struct fields, non-nil pointers and slice and array elements, ignoring validate tags, and builds its key with decision 1's rules. It returns `Validate(field)` with each violation prefixed by that key, so `ValidateField(m, &m.AMQP)` returns `amqp.url` and the walk makes `messaging.amqp.url`. Both pointers come from the same receiver, so it works with value receivers too: `&m` and `&m.AMQP` both point into the copy. A nil field returns `ErrNilConfig`. A field that isn't beneath the parent, the parent itself included, panics: it's a bug in the method, not a config problem, and the first test of that mode finds it.
+It finds `field` beneath `parent` by address, through struct fields, non-nil pointers and slice and array elements, ignoring validate tags, and builds its key with decision 1's rules. It returns `Validate(field)` with each violation prefixed by that key, so `ValidateField(m, &m.AMQP)` returns `amqp.url` and the walk makes `messaging.amqp.url`. Both pointers come from the same receiver, so it works with value receivers too: `&m` and `&m.AMQP` both point into the copy. It also finds a field behind map values, as `ValidateField(&d, d.DBs[d.Active])` passes for a map of pointers. A nil field returns `ErrNilConfig`, keyed at the field when the parent holds exactly one nil pointer of that type, so a missing optional section reads `messaging.amqp: config is nil`. A nil parent, or a field that isn't beneath the parent, the parent itself included, panics: it's a bug in the method, not a config problem, and the first test of that mode finds it.
 
 The rule for Validator authors, in godoc and docs: return `configvalidator.ValidateField(c, &c.Field)`, or join several results.
 
@@ -285,6 +288,8 @@ func WithFilename(path string) fx.Option     // fx.Supply(AsFilename(path))
 - **[Exporting the key-rule helpers widens the validator's API.]** → Two small functions, documented as the shared key rules. The alternative is drift.
 - **[Loads read the process environment, so loader tests can't run in parallel.]** → Accepted. The same holds for any `t.Setenv` test.
 
+- **[A type that embeds a nil pointer to a Validator and declares its own Validate is skipped too.]** → Reflection can't tell a declared method from a promoted one, so the walk treats both alike when the pointer is nil. The README advises against declaring `Validate` on such a type, and a test pins the behaviour.
+
 ## Migration Plan
 
 Nothing in this repo uses either module yet, so nothing migrates.
@@ -311,3 +316,27 @@ What changed while applying the first pull request, and why.
 - **`plan` selects every module, not just the new one.** Tasks 8.1 and 18.1 expected `plan` to print only the new module, but registering it changes `go.work`, which selects every module for lint and test (release-ci spec). `check` still covers only the new module. The tasks were corrected.
 - **`Errors` replaced `errors.Join`** at the user's request, after the first draft of the pull request. Validate and ValidateField return it for any number of violations, which also settles the open question of a helper to list them. The constitution's receiver rule gained an exception for slice error types.
 - **Open for the second pull request: `,remain`.** The loader must recognise a `,remain` field, which takes no env names and makes its level accept any key. The shared key rules don't cover it, so either the loader reads that tag option itself, or `config/configvalidator` gains a helper, which after `v0.1.0` means a 0.2.0 release first.
+
+## Fixes from code review
+
+The review of `add-configvalidator` at bc73835 found fifteen issues. All are fixed, each with a regression test, and the spec, README and decisions 3 and 4 above were updated to match.
+
+- **Invalid config getting through.**
+  - `prefix` split any error with `Unwrap() []error`, so `fmt.Errorf` with several `%w` verbs lost its text, and a custom join with no parts reported nothing. → Only `Errors` and `errors.Join`'s type split, recognised by type rather than by comparing messages (decision 4).
+  - A slice, array or map passed to `Validate` or `ValidateField` had its elements' Validators called but none of their tags checked. → Each element is checked as if validated alone.
+  - A tag failure in entry `acme.eu` suppressed `acme`'s Validator, because keys were compared as string prefixes. → Paths of segments (decision 3).
+  - The walk skipped unexported embedded structs, so Validators inside were never called, and `ValidateField` panicked on a field promoted from one. → Both enter embedded structs, exported or not.
+- **Panics.**
+  - A typed-nil `*Error` from a Validator, or an `*Error` with a nil `Err`, panicked. → A nil `*Error` is no violation, and a nil `Err` reads as "invalid".
+  - A Validate method promoted from a nil embedded pointer panicked when called. → Such a struct isn't treated as a Validator. Recovering the panic was rejected: it's fragile, and nil dereferences hang this development machine (go1.27.2, darwin/arm64) whether recovered or not, inside or outside the sandbox, so the fix couldn't depend on one.
+  - `ValidateField` couldn't find a field behind a map of pointers. → It looks through map values.
+- **Wrong keys.**
+  - `KeySegment` gave an unexported squashed embed a segment, though mapstructure decodes its fields at the parent's level. → Squash is checked before exportedness for embedded fields.
+  - `ValidateField` on a nil field reported "config is nil" at the parent's key. → It names the field when that's unambiguous.
+  - Entry names holding `]`, or starting with `[`, were mis-parsed or lost their dot. → Paths, and namespace resolution that tries each `]` in turn until the rest of the namespace fits.
+  - Typed map keys were named by their `String` method. → Their text form or underlying value.
+- **Order and efficiency.**
+  - Tag violations under maps came out in random order. → Sorted by path: fields by declaration, elements by index, entries by name.
+  - The walk reflected over every element of scalar slices, and resolving a map entry rescanned the map for each failure. → Containers that can't hold a Validator are passed over, and each map is indexed once per tag pass.
+- **Design.** Keys flattened into strings early and re-parsed caused three of the above, plus the squash over-suppression decision 3 had accepted. → Positions stay segment lists until a `Key` is written, which removed that accepted trade-off.
+

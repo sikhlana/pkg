@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -14,78 +15,126 @@ import (
 var rules = validator.New(validator.WithRequiredStructEnabled())
 
 // checkTags evaluates the validate tags on v and everything reachable from it, and returns an *Error with a *RuleError
-// cause for each failure. It returns nothing when v, after following pointers and interfaces, is nil, isn't a struct,
-// or decodes itself from text: there are no fields to evaluate.
+// cause for each failure, in the order of their keys. A struct is evaluated whole. A slice, array or map has no fields
+// of its own, so each element is checked the same way under its index or entry, which is how ValidateField checks a
+// slice or map field. Nothing is returned for a nil value, a type that decodes itself from text, or any other kind:
+// there are no fields to evaluate.
 func checkTags(v reflect.Value) []*Error {
+	var c tagChecker
+
+	c.check(v, nil)
+
+	slices.SortStableFunc(c.violations, func(a, b *Error) int {
+		return comparePaths(a.at, b.at)
+	})
+
+	return c.violations
+}
+
+// tagChecker collects the tag violations beneath one root.
+type tagChecker struct {
+	violations []*Error
+
+	// entries holds each map's entries by the name go-playground prints for their keys, so a map is indexed once
+	// however many of its entries fail.
+	entries map[uintptr]map[string]entry
+}
+
+// check evaluates the tags on v, whose path is at.
+func (c *tagChecker) check(v reflect.Value, at path) {
 	v, ok := indirect(v)
 
-	if !ok || v.Kind() != reflect.Struct || DecodesText(v.Type()) {
-		return nil
+	if !ok || DecodesText(v.Type()) {
+		return
 	}
 
+	switch v.Kind() { //nolint:exhaustive // Only structs have tags, and only containers hold structs.
+	case reflect.Struct:
+		c.checkStruct(v, at)
+	case reflect.Slice, reflect.Array:
+		if !containerKind(v.Type().Elem().Kind()) {
+			return
+		}
+
+		for i := range v.Len() {
+			c.check(v.Index(i), at.child(segment{kind: indexKind, index: i}))
+		}
+	case reflect.Map:
+		if !containerKind(v.Type().Elem().Kind()) {
+			return
+		}
+
+		for _, e := range sortedEntries(v) {
+			c.check(e.value, at.child(segment{kind: entryKind, name: e.name}))
+		}
+	}
+}
+
+// checkStruct evaluates the tags on struct v, whose path is at, and everything reachable from it.
+func (c *tagChecker) checkStruct(v reflect.Value, at path) {
 	err := rules.Struct(v.Interface())
 	if err == nil {
-		return nil
+		return
 	}
 
 	failures, ok := errors.AsType[validator.ValidationErrors](err)
 
 	if !ok {
-		return []*Error{{Err: err}}
-	}
+		c.violations = append(c.violations, newError(at, err))
 
-	violations := make([]*Error, 0, len(failures))
+		return
+	}
 
 	for _, failure := range failures {
-		violations = append(violations, &Error{
-			Key: namespaceKey(v, failure.StructNamespace()),
-			Err: &RuleError{Tag: failure.Tag(), Param: failure.Param()},
-		})
+		c.violations = append(c.violations, newError(
+			at.join(c.resolve(v, failure.StructNamespace())),
+			&RuleError{Tag: failure.Tag(), Param: failure.Param()},
+		))
 	}
-
-	return violations
 }
 
-// namespaceKey translates the Go-name namespace go-playground reports for a failure under root, such as
-// "Config.Hosts[2].Addr", into the config key it names, such as "hosts[2].addr". It follows the namespace through
-// root's value, so squashed fields drop out, interface fields are seen through, and a map entry's name is matched
-// against the map's keys even when it contains dots or brackets. If the namespace stops matching the value, the rest
-// of it is appended as it is.
-func namespaceKey(root reflect.Value, namespace string) string {
+// resolve translates the Go-name namespace go-playground reports for a failure under root, such as
+// "Config.Hosts[2].Addr", into the path it names. It follows the namespace through root's value, so squashed fields
+// become squash segments, interface fields are seen through, and a map entry's name is matched against the map's
+// keys. If the namespace can't be followed, the part after the root is kept as one raw segment.
+func (c *tagChecker) resolve(root reflect.Value, namespace string) path {
 	// An anonymous root struct has no name, and its namespace starts at the first field.
 	rest := strings.TrimPrefix(namespace, root.Type().Name())
-	v := root
-	key := ""
 
-	for rest != "" {
-		var ok bool
-
-		v, ok = indirect(v)
-
-		if ok {
-			switch v.Kind() { //nolint:exhaustive // A namespace only continues through containers.
-			case reflect.Struct:
-				key, v, rest, ok = fieldStep(key, v, rest)
-			case reflect.Slice, reflect.Array:
-				key, v, rest, ok = indexStep(key, v, rest)
-			case reflect.Map:
-				key, v, rest, ok = entryStep(key, v, rest)
-			default:
-				ok = false
-			}
-		}
-
-		if !ok {
-			return joinKey(key, strings.TrimPrefix(rest, "."))
-		}
+	if at, ok := c.follow(root, rest, nil); ok {
+		return at
 	}
 
-	return key
+	return path{{kind: rawKind, name: strings.TrimPrefix(rest, ".")}}
 }
 
-// fieldStep consumes ".Name" or, at the start of an anonymous root's namespace, "Name" from rest, where Name is one of
-// struct v's own fields, and appends that field's segment to key.
-func fieldStep(key string, v reflect.Value, rest string) (string, reflect.Value, string, bool) {
+// follow returns at extended by the path the namespace rest names beneath v, and false when rest doesn't fit v.
+func (c *tagChecker) follow(v reflect.Value, rest string, at path) (path, bool) {
+	if rest == "" {
+		return at, true
+	}
+
+	v, ok := indirect(v)
+
+	if !ok {
+		return nil, false
+	}
+
+	switch v.Kind() { //nolint:exhaustive // A namespace only continues through containers.
+	case reflect.Struct:
+		return c.followField(v, rest, at)
+	case reflect.Slice, reflect.Array:
+		return c.followIndex(v, rest, at)
+	case reflect.Map:
+		return c.followEntry(v, rest, at)
+	default:
+		return nil, false
+	}
+}
+
+// followField follows ".Name", or "Name" at the start of an anonymous root's namespace, where Name is one of struct
+// v's own fields.
+func (c *tagChecker) followField(v reflect.Value, rest string, at path) (path, bool) {
 	rest = strings.TrimPrefix(rest, ".")
 
 	end := strings.IndexAny(rest, ".[")
@@ -96,59 +145,77 @@ func fieldStep(key string, v reflect.Value, rest string) (string, reflect.Value,
 
 	for f, field := range v.Fields() {
 		if f.Name == rest[:end] {
-			return joinKey(key, fieldSegment(f)), field, rest[end:], true
+			return c.follow(field, rest[end:], at.child(fieldSegment(f)))
 		}
 	}
 
-	return key, v, rest, false
+	return nil, false
 }
 
-// indexStep consumes "[i]" from rest, where i is an index of slice or array v, and appends it to key.
-func indexStep(key string, v reflect.Value, rest string) (string, reflect.Value, string, bool) {
+// followIndex follows "[i]", where i is an index of slice or array v.
+func (c *tagChecker) followIndex(v reflect.Value, rest string, at path) (path, bool) {
 	end := strings.IndexByte(rest, ']')
 
 	if !strings.HasPrefix(rest, "[") || end < 0 {
-		return key, v, rest, false
+		return nil, false
 	}
 
 	i, err := strconv.Atoi(rest[1:end])
 
 	if err != nil || i < 0 || i >= v.Len() {
-		return key, v, rest, false
+		return nil, false
 	}
 
-	return key + rest[:end+1], v.Index(i), rest[end+1:], true
+	return c.follow(v.Index(i), rest[end+1:], at.child(segment{kind: indexKind, index: i}))
 }
 
-// entryStep consumes "[entry]" from rest, where entry names one of map v's keys, and appends ".entry" to key. The
-// entry ends at the first "]" that closes the name of a key v has, so names containing "]" are found too.
-func entryStep(key string, v reflect.Value, rest string) (string, reflect.Value, string, bool) {
+// followEntry follows "[name]", where name is how go-playground prints one of map v's keys. A name can itself hold
+// "]", so each "]" is tried in turn until the entry it closes exists and the rest of the namespace fits beneath it.
+func (c *tagChecker) followEntry(v reflect.Value, rest string, at path) (path, bool) {
 	if !strings.HasPrefix(rest, "[") {
-		return key, v, rest, false
+		return nil, false
 	}
+
+	entries := c.index(v)
 
 	for end := 1; end < len(rest); end++ {
 		if rest[end] != ']' {
 			continue
 		}
 
-		for k, value := range v.Seq2() {
-			if fmt.Sprint(k) == rest[1:end] {
-				return entryKey(key, rest[1:end]), value, rest[end+1:], true
-			}
+		e, ok := entries[rest[1:end]]
+
+		if !ok {
+			continue
+		}
+
+		if found, fits := c.follow(e.value, rest[end+1:], at.child(segment{kind: entryKind, name: e.name})); fits {
+			return found, true
 		}
 	}
 
-	return key, v, rest, false
+	return nil, false
 }
 
-// entryKey appends a map entry's name to key with a dot, whatever the name contains.
-func entryKey(key, entry string) string {
-	if key == "" {
-		return entry
+// index returns map v's entries by the name go-playground prints for their keys, building it on first use.
+func (c *tagChecker) index(v reflect.Value) map[string]entry {
+	if entries, ok := c.entries[v.Pointer()]; ok {
+		return entries
 	}
 
-	return key + "." + entry
+	entries := make(map[string]entry, v.Len())
+
+	for k, value := range v.Seq2() {
+		entries[fmt.Sprint(k)] = entry{name: entryName(k), value: value}
+	}
+
+	if c.entries == nil {
+		c.entries = make(map[uintptr]map[string]entry)
+	}
+
+	c.entries[v.Pointer()] = entries
+
+	return entries
 }
 
 // indirect follows non-nil pointers and interfaces to the value they hold, and returns false when it meets a nil one.

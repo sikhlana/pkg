@@ -73,6 +73,26 @@ func TestKeySegment(t *testing.T) {
 			want:  "",
 			ok:    false,
 		},
+		{
+			name: "unexported embedded with squash",
+			field: reflect.StructField{
+				Name: "base", PkgPath: "example.com/app", Anonymous: true, Tag: `mapstructure:",squash"`,
+			},
+			want: "",
+			ok:   true,
+		},
+		{
+			name:  "unexported embedded without squash",
+			field: reflect.StructField{Name: "base", PkgPath: "example.com/app", Anonymous: true},
+			want:  "",
+			ok:    false,
+		},
+		{
+			name:  "unexported squash without embedding",
+			field: reflect.StructField{Name: "base", PkgPath: "example.com/app", Tag: `mapstructure:",squash"`},
+			want:  "",
+			ok:    false,
+		},
 	}
 
 	for _, tt := range tests {

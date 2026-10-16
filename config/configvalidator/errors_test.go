@@ -21,6 +21,12 @@ func TestErrorRendering(t *testing.T) {
 	}{
 		{name: "key", err: &configvalidator.Error{Key: "http.port", Err: errBoom}, want: "http.port: boom"},
 		{name: "no key", err: &configvalidator.Error{Err: errBoom}, want: "boom"},
+		{name: "no cause", err: &configvalidator.Error{Key: "cert_path"}, want: "cert_path: invalid"},
+		{
+			name: "nil violations skipped",
+			err:  configvalidator.Errors{nil, &configvalidator.Error{Err: errBoom}},
+			want: "boom",
+		},
 		{name: "rule", err: &configvalidator.RuleError{Tag: "min", Param: "1024"}, want: "fails min=1024"},
 		{name: "rule without a parameter", err: &configvalidator.RuleError{Tag: "required"}, want: "fails required"},
 	}
@@ -166,4 +172,48 @@ func TestPrefixLeavesItsInputAlone(t *testing.T) {
 	assert.Equal(t, &configvalidator.Error{Key: "url", Err: errBoom}, child)
 	require.EqualError(t, joined, "url: boom\nqueue: boom")
 	assert.Equal(t, configvalidator.Errors{child}, errs)
+}
+
+// emptyJoinError claims to join errors but holds none.
+type emptyJoinError struct{}
+
+func (emptyJoinError) Error() string {
+	return "nothing joined"
+}
+
+func (emptyJoinError) Unwrap() []error {
+	return nil
+}
+
+// texts returns the message of each violation in errs.
+func texts(errs configvalidator.Errors) []string {
+	result := make([]string, 0, len(errs))
+
+	for _, err := range errs {
+		result = append(result, err.Error())
+	}
+
+	return result
+}
+
+func TestPrefixKeepsWrappersWhole(t *testing.T) {
+	multi := fmt.Errorf("ports overlap between %w and %w", errBoom, errors.New("grpc"))
+
+	got := configvalidator.Prefix("s", multi)
+
+	assert.Equal(t, []string{"s: ports overlap between boom and grpc"}, texts(got))
+	require.ErrorIs(t, got, errBoom)
+	assert.Equal(t, []string{"s: nothing joined"}, texts(configvalidator.Prefix("s", emptyJoinError{})))
+}
+
+func TestPrefixDropsTypedNilViolations(t *testing.T) {
+	var violation *configvalidator.Error
+
+	assert.Empty(t, configvalidator.Prefix("s", violation))
+	assert.Empty(t, configvalidator.Prefix("s", configvalidator.Errors{violation, nil}))
+	assert.Equal(
+		t,
+		[]string{"s.url: boom"},
+		texts(configvalidator.Prefix("s", errors.Join(violation, &configvalidator.Error{Key: "url", Err: errBoom}))),
+	)
 }

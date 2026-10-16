@@ -14,6 +14,8 @@ import (
 var (
 	errUnknownMode = errors.New("unknown mode")
 	errNoCert      = errors.New("missing cert")
+	errHTTPPort    = errors.New("http")
+	errGRPCPort    = errors.New("grpc")
 )
 
 type AMQP struct {
@@ -136,6 +138,109 @@ type NoViolations struct{}
 
 func (NoViolations) Validate() error {
 	return configvalidator.Errors{}
+}
+
+// Site is a Validator with a tag of its own, failing with its Reason.
+type Site struct {
+	URL    string `mapstructure:"url"    validate:"required"`
+	Reason string `mapstructure:"reason"`
+}
+
+func (s Site) Validate() error {
+	return errors.New(s.Reason)
+}
+
+// common is unexported and squashed into its parents, which still gain its exported fields.
+type common struct {
+	TLS   AMQP  `mapstructure:"tls"   validate:"-"`
+	Audit Check `mapstructure:"audit"`
+}
+
+// UsesCommon delegates to a field promoted from common.
+type UsesCommon struct {
+	common `mapstructure:",squash"`
+}
+
+func (u UsesCommon) Validate() error {
+	return configvalidator.ValidateField(&u, &u.TLS)
+}
+
+// TypedNil returns a nil *Error, which isn't a violation, or, with Bad set, an *Error that has no cause.
+type TypedNil struct {
+	Bad bool `mapstructure:"bad"`
+}
+
+func (n TypedNil) Validate() error {
+	var violation *configvalidator.Error
+
+	if n.Bad {
+		violation = &configvalidator.Error{Key: "cert_path"}
+	}
+
+	return violation
+}
+
+// Secured gains SSL's Validate method through an embedded pointer, which is nil when the ssl section is missing.
+type Secured struct {
+	*SSL `mapstructure:"ssl"`
+}
+
+// Shadowing declares its own Validate method beside an embedded SSL pointer.
+type Shadowing struct {
+	*SSL `mapstructure:"ssl"`
+}
+
+func (Shadowing) Validate() error {
+	return errors.New("shadowing")
+}
+
+// Databases delegates to its active database, held in a map of pointers its tags skip.
+type Databases struct {
+	Active string           `mapstructure:"active"`
+	DBs    map[string]*AMQP `mapstructure:"dbs"    validate:"-"`
+}
+
+func (d Databases) Validate() error {
+	return configvalidator.ValidateField(&d, d.DBs[d.Active])
+}
+
+// OptionalAMQP dispatches to an optional AMQP section, nil when it's missing.
+type OptionalAMQP struct {
+	Mode string `mapstructure:"mode" validate:"oneof=file amqp"`
+	AMQP *AMQP  `mapstructure:"amqp" validate:"-"`
+}
+
+func (o OptionalAMQP) Validate() error {
+	if o.Mode == "amqp" {
+		return configvalidator.ValidateField(&o, o.AMQP)
+	}
+
+	return nil
+}
+
+// Hosts delegates to its hosts, a map its tags skip.
+type Hosts struct {
+	Hosts map[string]PointerCheck `mapstructure:"hosts" validate:"-"`
+}
+
+func (h Hosts) Validate() error {
+	return configvalidator.ValidateField(&h, &h.Hosts)
+}
+
+// Brokers delegates to its brokers, a slice its tags skip.
+type Brokers struct {
+	Brokers []AMQP `mapstructure:"brokers" validate:"-"`
+}
+
+func (b Brokers) Validate() error {
+	return configvalidator.ValidateField(&b, &b.Brokers)
+}
+
+// Overlap fails with a message that wraps two errors.
+type Overlap struct{}
+
+func (Overlap) Validate() error {
+	return fmt.Errorf("ports overlap between %w and %w", errHTTPPort, errGRPCPort)
 }
 
 // violations returns the violations in err, which Validate returns as an Errors.
@@ -452,9 +557,72 @@ func TestValidateFieldOutsideItsParentPanics(t *testing.T) {
 }
 
 func TestValidateFieldNilField(t *testing.T) {
-	var cfg Messaging
+	type twoSections struct {
+		A *AMQP `mapstructure:"a"`
+		B *AMQP `mapstructure:"b"`
+	}
+
+	var (
+		cfg Messaging
+		two twoSections
+	)
 
 	require.ErrorIs(t, configvalidator.ValidateField(&cfg, (*AMQP)(nil)), configvalidator.ErrNilConfig)
+
+	err := configvalidator.ValidateField(&two, two.A)
+
+	require.ErrorIs(t, err, configvalidator.ErrNilConfig)
+
+	_, keyed := errors.AsType[configvalidator.Errors](err)
+	assert.False(t, keyed, "two nil sections can't say which one is missing")
+}
+
+func TestValidateFieldNamesAMissingSection(t *testing.T) {
+	type config struct {
+		Messaging OptionalAMQP `mapstructure:"messaging"`
+	}
+
+	err := configvalidator.Validate(&config{Messaging: OptionalAMQP{Mode: "amqp"}})
+
+	assert.Equal(t, []string{"messaging.amqp: config is nil"}, messages(t, err))
+	require.ErrorIs(t, err, configvalidator.ErrNilConfig)
+}
+
+func TestValidateFieldBehindAMap(t *testing.T) {
+	type config struct {
+		Databases Databases `mapstructure:"databases"`
+	}
+
+	cfg := config{Databases: Databases{
+		Active: "main",
+		DBs:    map[string]*AMQP{"main": {URL: "amqp://mq"}, "spare": {}},
+	}}
+
+	assert.Equal(t, []string{"databases.dbs.main.queue: fails required"}, messages(t, configvalidator.Validate(&cfg)))
+}
+
+func TestValidateFieldKeepsEntryNamesWhole(t *testing.T) {
+	type config struct {
+		S Hosts `mapstructure:"s"`
+	}
+
+	cfg := config{S: Hosts{Hosts: map[string]PointerCheck{"[::1]:5432": {Reason: "bad"}}}}
+
+	assert.Equal(t, []string{"s.hosts.[::1]:5432: bad"}, messages(t, configvalidator.Validate(&cfg)))
+}
+
+func TestValidateFieldChecksTagsOfASliceField(t *testing.T) {
+	type config struct {
+		Messaging Brokers `mapstructure:"messaging"`
+	}
+
+	cfg := config{Messaging: Brokers{Brokers: []AMQP{{URL: "amqp://mq"}}}}
+
+	assert.Equal(
+		t,
+		[]string{"messaging.brokers[0].queue: fails required"},
+		messages(t, configvalidator.Validate(&cfg)),
+	)
 }
 
 func TestKeysOfUnusualRoots(t *testing.T) {
@@ -492,6 +660,97 @@ func TestNilConfig(t *testing.T) {
 	var cfg *Root
 
 	require.ErrorIs(t, configvalidator.Validate(cfg), configvalidator.ErrNilConfig)
+}
+
+func TestTagFailureInOneEntrySuppressesOnlyThatEntry(t *testing.T) {
+	type config struct {
+		Sites map[string]Site `mapstructure:"sites" validate:"dive"`
+	}
+
+	cfg := config{Sites: map[string]Site{
+		"acme":    {URL: "https://acme.example", Reason: "acme"},
+		"acme.eu": {Reason: "eu"},
+	}}
+
+	assert.Equal(
+		t,
+		[]string{"sites.acme.eu.url: fails required", "sites.acme: acme"},
+		messages(t, configvalidator.Validate(&cfg)),
+	)
+}
+
+func TestTagFailureBesideASquashedValidatorDoesntSuppressIt(t *testing.T) {
+	type config struct {
+		Section Check `mapstructure:",squash"`
+		Port    int   `mapstructure:"port"    validate:"min=1024"`
+	}
+
+	cfg := config{Section: Check{Reason: "section"}, Port: 80}
+
+	assert.Equal(t, []string{"port: fails min=1024", "section"}, messages(t, configvalidator.Validate(&cfg)))
+}
+
+func TestWalkEntersUnexportedEmbeddedStructs(t *testing.T) {
+	type config struct {
+		common `mapstructure:",squash"`
+	}
+
+	type wrapper struct {
+		Section UsesCommon `mapstructure:"section"`
+	}
+
+	assert.Equal(
+		t,
+		[]string{"audit: audit"},
+		messages(t, configvalidator.Validate(&config{Audit: Check{Reason: "audit"}})),
+	)
+	assert.Equal(
+		t,
+		[]string{"section.tls.url: fails required", "section.tls.queue: fails required"},
+		messages(t, configvalidator.Validate(&wrapper{})),
+	)
+}
+
+func TestValidatorReturningTypedNilOrNoCause(t *testing.T) {
+	type config struct {
+		OK  TypedNil `mapstructure:"ok"`
+		Bad TypedNil `mapstructure:"bad"`
+	}
+
+	assert.Equal(
+		t,
+		[]string{"bad.cert_path: invalid"},
+		messages(t, configvalidator.Validate(&config{Bad: TypedNil{Bad: true}})),
+	)
+}
+
+func TestPromotedValidatorOfAMissingSection(t *testing.T) {
+	type config struct {
+		Secured   Secured   `mapstructure:"secured"`
+		Shadowing Shadowing `mapstructure:"shadowing"`
+	}
+
+	require.NoError(t, configvalidator.Validate(&config{}))
+
+	cfg := config{Secured: Secured{SSL: &SSL{}}, Shadowing: Shadowing{SSL: &SSL{}}}
+
+	assert.Equal(
+		t,
+		[]string{"secured.cert_path: missing cert", "shadowing: shadowing"},
+		messages(t, configvalidator.Validate(&cfg)),
+	)
+}
+
+func TestValidatorWrappingSeveralErrorsKeepsItsText(t *testing.T) {
+	type config struct {
+		Ports Overlap `mapstructure:"ports"`
+	}
+
+	err := configvalidator.Validate(&config{})
+
+	assert.Equal(t, []string{"ports: ports overlap between http and grpc"}, messages(t, err))
+	require.ErrorIs(t, err, errHTTPPort)
+	require.ErrorIs(t, err, errGRPCPort)
 }
 
 func ExampleValidate() {

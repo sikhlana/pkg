@@ -1,6 +1,7 @@
 package configvalidator_test
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -34,6 +35,29 @@ type Tenant struct {
 
 type Box[T any] struct {
 	V T `mapstructure:"v"`
+}
+
+// shared is unexported, but mapstructure still decodes its exported fields when it's squashed into a parent.
+type shared struct {
+	Name string `mapstructure:"name" validate:"required"`
+}
+
+// Env is a map key whose String method is for display, not the key a config file holds.
+type Env string
+
+func (e Env) String() string {
+	return "ENV(" + string(e) + ")"
+}
+
+// Tier is a map key that a config file writes in its text form.
+type Tier int
+
+func (t Tier) MarshalText() ([]byte, error) {
+	return []byte("tier-" + strconv.Itoa(int(t))), nil
+}
+
+func (t Tier) String() string {
+	return "Tier(" + strconv.Itoa(int(t)) + ")"
 }
 
 func validHTTP() HTTP {
@@ -128,7 +152,7 @@ func TestTagViolationKeysOfElements(t *testing.T) {
 		Matrix:    [][]int{{1, 0}},
 	}
 
-	assert.ElementsMatch(t, []string{
+	assert.Equal(t, []string{
 		"hosts[2]: fails hostname",
 		"databases.reporting: fails url",
 		"tenants.acme.corp]eu.url: fails required",
@@ -161,4 +185,79 @@ func TestTagViolationOmitsTheValue(t *testing.T) {
 
 	assert.Equal(t, []string{"password: fails min=12", "mode: fails oneof=read write"}, messages(t, err))
 	assert.NotContains(t, err.Error(), "hunter2")
+}
+
+func TestTagsCheckElementsOfSliceAndMapRoots(t *testing.T) {
+	tenants := []Tenant{{URL: "https://acme.example"}, {}}
+	byName := map[string]Tenant{"acme": {URL: "https://acme.example"}, "beta": {}}
+
+	assert.Equal(t, []string{"[1].url: fails required"}, messages(t, configvalidator.Validate(&tenants)))
+	assert.Equal(t, []string{"beta.url: fails required"}, messages(t, configvalidator.Validate(&byName)))
+}
+
+func TestTagViolationKeysOfAwkwardEntryNames(t *testing.T) {
+	type config struct {
+		Tenants map[string]Tenant `mapstructure:"tenants" validate:"dive"`
+	}
+
+	cfg := config{Tenants: map[string]Tenant{"a": {URL: "https://a.example"}, "a]b": {}, "[::1]:5432": {}}}
+
+	assert.Equal(
+		t,
+		[]string{"tenants.[::1]:5432.url: fails required", "tenants.a]b.url: fails required"},
+		messages(t, configvalidator.Validate(&cfg)),
+	)
+}
+
+func TestTagViolationsComeInKeyOrder(t *testing.T) {
+	type config struct {
+		Tenants map[string]Tenant `mapstructure:"tenants" validate:"dive"`
+		Port    int               `mapstructure:"port"    validate:"min=1024"`
+	}
+
+	cfg := config{Tenants: map[string]Tenant{"e": {}, "c": {}, "a": {}, "d": {}, "b": {}}, Port: 80}
+	want := []string{
+		"tenants.a.url: fails required",
+		"tenants.b.url: fails required",
+		"tenants.c.url: fails required",
+		"tenants.d.url: fails required",
+		"tenants.e.url: fails required",
+		"port: fails min=1024",
+	}
+
+	for range 20 {
+		require.Equal(t, want, messages(t, configvalidator.Validate(&cfg)))
+	}
+}
+
+func TestTagViolationKeysThroughUnexportedSquash(t *testing.T) {
+	type config struct {
+		shared `mapstructure:",squash"`
+
+		Port int `mapstructure:"port" validate:"min=1024"`
+	}
+
+	assert.Equal(
+		t,
+		[]string{"name: fails required", "port: fails min=1024"},
+		messages(t, configvalidator.Validate(&config{Port: 80})),
+	)
+}
+
+func TestEntryNamesUseTheKeyNotItsDisplay(t *testing.T) {
+	type config struct {
+		Envs  map[Env]Tenant `mapstructure:"envs"  validate:"dive"`
+		Tiers map[Tier]Check `mapstructure:"tiers"`
+	}
+
+	cfg := config{
+		Envs:  map[Env]Tenant{"prod": {}},
+		Tiers: map[Tier]Check{2: {Reason: "noisy"}},
+	}
+
+	assert.Equal(
+		t,
+		[]string{"envs.prod.url: fails required", "tiers.tier-2: noisy"},
+		messages(t, configvalidator.Validate(&cfg)),
+	)
 }

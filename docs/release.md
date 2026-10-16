@@ -39,6 +39,16 @@ Two gaps are accepted:
 
 Immutable releases are on. A published release's tag can't be moved or deleted, which matches the module proxy, where a version is fixed once fetched. Mistakes are fixed forward with a new patch version.
 
+## "Latest" is GitHub's call
+
+A repository of independently versioned modules has no single latest release, so `publish` never asks GitHub to mark one. That doesn't stop GitHub: when no release is marked latest, it treats the newest full release as latest. Publishing `cli/v0.1.0` and then `cli/v0.2.0` showed the badge moving to each in turn. Leaving the flag out of the request would get the same result, so `publish` keeps sending `make_latest: false` rather than claim a choice it doesn't make. Marking releases as prereleases would hide the badge, but would mislabel stable releases.
+
+## Commit types describe; VERSION decides
+
+Commit subjects and pull request titles follow Conventional Commits, and squash merges make the pull request title `main`'s commit subject. Since `publish` builds release notes from those subjects, the notes say what kind of change each line is, with no change to `publish`.
+
+The type never sets a version. A `feat(cli)` pull request that adds exports still bumps `cli/VERSION` by hand, and the gorelease floor still checks it. This is the commit-message versioning rejected above, kept out on purpose: a `fix` can be a behaviour change worth a minor, and only the author can tell. The PR title check (`pr-title.yaml`) checks the form, not the bump.
+
 ## Tags and majors follow the go command
 
 The go command looks for `logger/v2`'s versions under `logger/`, not `logger/v2/`. So a module in a major version directory is tagged without it: `logger/v2` at 2.1.0 is `logger/v2.1.0`.
@@ -87,7 +97,7 @@ The tests build throwaway git repositories, and the gorelease tests make the go 
 
 ## CI layout
 
-- **One required check.** Branch protection requires CI OK, a job that needs every other job and fails only on a failure or cancellation. Skipped matrices count as passing, so a PR touching no module still merges.
+- **Two required checks.** Branch protection requires CI OK, a job that needs every other job and fails only on a failure or cancellation. Skipped matrices count as passing, so a PR touching no module still merges. It also requires PR title, from its own workflow. That workflow also runs on title edits, and running all of CI on every edit would be wasteful. Skipping CI's jobs on edits would be worse: CI OK would pass for a head commit whose lint had failed.
 - **Cached binaries.** Jobs restore the tool and gorelease from a cache keyed on everything they're built from, the composite action included, instead of compiling in every job.
 - **One publish at a time.** Publishes run one after another, and `concurrency.queue: max` keeps every waiting run. With the default, a third quick merge would replace the second's pending publish.
 - **Timeouts.** Every job has a timeout, and so does each gorelease run, so a stalled download can't hold the required check for hours.

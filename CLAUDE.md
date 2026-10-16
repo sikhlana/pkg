@@ -4,15 +4,15 @@ A personal library of reusable Go modules, wired through [Uber fx](https://uber-
 
 ## Read these first
 
-| File                            | Owns                                                                                                               |
-|---------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| openspec/config.yaml            | The constitution: fx patterns, config vs wiring, code and test standards, tooling, versioning, docs and spec rules |
-| .golangci.yml                   | Lint and format rules, including the bans the constitution calls for                                               |
-| README.md                       | The human entry point: module table, install, release flow, adding a module                                        |
-| <module>/README.md              | One module's Configuration, Exported Members and Usage                                                             |
-| openspec/specs/<module>/spec.md | The behavioural guarantees a module makes to consumers                                                             |
-| docs/<topic>.md                 | Why a cross-module pattern or trade-off is shaped the way it is                                                    |
-| tools/release/README.md         | The release CI tool: what plan, check and publish enforce on pull requests and main                                |
+| File                            | Owns                                                                                                                                |
+|---------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| openspec/config.yaml            | The constitution: fx patterns, config vs wiring, code and test standards, tooling, versioning, commit messages, docs and spec rules |
+| .golangci.yml                   | Lint and format rules, including the bans the constitution calls for                                                                |
+| README.md                       | The human entry point: module table, install, release flow, adding a module                                                         |
+| <module>/README.md              | One module's Configuration, Exported Members and Usage                                                                              |
+| openspec/specs/<module>/spec.md | The behavioural guarantees a module makes to consumers                                                                              |
+| docs/<topic>.md                 | Why a cross-module pattern or trade-off is shaped the way it is                                                                     |
+| tools/release/README.md         | The release CI tool: what plan, check and publish enforce on pull requests and main                                                 |
 
 ## Making a change
 

@@ -2,13 +2,48 @@ package configvalidator
 
 import (
 	"errors"
+	"strings"
 )
 
 // ErrNilConfig is returned by Validate when it's given a nil config.
 var ErrNilConfig = errors.New("config is nil")
 
+// Errors is every violation Validate found, each an *Error, in the order it found them: failed tags first, then what
+// Validators returned. Validate returns one only when it holds at least one violation. errors.AsType gets it back
+// through any wrapping, and errors.Is and errors.AsType look inside each violation.
+type Errors []error
+
+// Error returns each violation's message on its own line.
+func (e Errors) Error() string {
+	var b strings.Builder
+
+	for i, err := range e {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+
+		b.WriteString(err.Error())
+	}
+
+	return b.String()
+}
+
+// Unwrap returns the violations, so errors.Is and errors.AsType check each of them.
+func (e Errors) Unwrap() []error {
+	return e
+}
+
+// orNil returns e, or nil when e is empty, so an error result is never a non-nil empty Errors.
+func (e Errors) orNil() error {
+	if len(e) == 0 {
+		return nil
+	}
+
+	return e
+}
+
 // Error is one violation found by Validate: the config key it's about and what's wrong there. Validate returns each
-// violation as an *Error, alone or joined with the others, and a Validator can return one to name a child's key.
+// violation as an *Error inside an Errors, and a Validator can return one to name a child's key.
 type Error struct {
 	// Key is the dotted config key of the failing value, as an operator would write it: "http.port", "hosts[2]" or
 	// "databases.reporting". It's empty when the failure is about the config as a whole.
@@ -52,24 +87,24 @@ func (e *RuleError) Error() string {
 }
 
 // prefix returns the violations in err, each keyed beneath key. A top-level *Error becomes a new *Error with key
-// joined to its own, a joined error is split and each part handled the same way, and anything else becomes an
-// *Error at key. err is never modified.
+// joined to its own, an Errors or other joined error is split and each part handled the same way, and anything else
+// becomes an *Error at key. err is never modified.
 //
 // A keyed error wrapped by fmt.Errorf is in the last group: its text is kept, and its own key is part of that text
 // rather than the result's Key.
-func prefix(key string, err error) []error {
+func prefix(key string, err error) Errors {
 	//nolint:errorlint // Only a top-level *Error or join composes; anything wrapping one is opaque by design.
 	switch err := err.(type) {
 	case nil:
 		return nil
 	case *Error:
 		if key == "" {
-			return []error{err}
+			return Errors{err}
 		}
 
-		return []error{&Error{Key: joinKey(key, err.Key), Err: err.Err}}
+		return Errors{&Error{Key: joinKey(key, err.Key), Err: err.Err}}
 	case interface{ Unwrap() []error }:
-		var violations []error
+		var violations Errors
 
 		for _, part := range err.Unwrap() {
 			violations = append(violations, prefix(key, part)...)
@@ -77,6 +112,6 @@ func prefix(key string, err error) []error {
 
 		return violations
 	default:
-		return []error{&Error{Key: key, Err: err}}
+		return Errors{&Error{Key: key, Err: err}}
 	}
 }

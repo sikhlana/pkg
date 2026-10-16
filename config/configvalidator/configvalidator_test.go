@@ -131,7 +131,14 @@ type Embeds struct {
 	Other PointerCheck `mapstructure:"other"`
 }
 
-// violations returns the violations in err, which Validate returns alone or joined.
+// NoViolations returns an empty Errors, which reports nothing.
+type NoViolations struct{}
+
+func (NoViolations) Validate() error {
+	return configvalidator.Errors{}
+}
+
+// violations returns the violations in err, which Validate returns as an Errors.
 func violations(t *testing.T, err error) []*configvalidator.Error {
 	t.Helper()
 
@@ -139,17 +146,15 @@ func violations(t *testing.T, err error) []*configvalidator.Error {
 		return nil
 	}
 
-	parts := []error{err}
+	errs, ok := err.(configvalidator.Errors) //nolint:errorlint // The result must be an Errors, not wrap one.
+	require.True(t, ok, "%T isn't a configvalidator.Errors", err)
+	require.NotEmpty(t, errs)
 
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		parts = joined.Unwrap()
-	}
+	result := make([]*configvalidator.Error, 0, len(errs))
 
-	result := make([]*configvalidator.Error, 0, len(parts))
-
-	for _, part := range parts {
-		violation, ok := part.(*configvalidator.Error) //nolint:errorlint // Each part must be an *Error, not wrap one.
-		require.True(t, ok, "%T isn't a *configvalidator.Error", part)
+	for _, part := range errs {
+		violation, isError := part.(*configvalidator.Error) //nolint:errorlint // Each part must be an *Error, not wrap one.
+		require.True(t, isError, "%T isn't a *configvalidator.Error", part)
 
 		result = append(result, violation)
 	}
@@ -291,11 +296,15 @@ func TestEveryViolationIsReported(t *testing.T) {
 		Cache Cache `mapstructure:"cache"`
 	}
 
-	assert.Equal(
-		t,
-		[]string{"http.host: fails required", "http.port: fails min=1024", "cache.ttl: fails required"},
-		messages(t, configvalidator.Validate(&config{})),
-	)
+	err := configvalidator.Validate(&config{})
+
+	want := []string{"http.host: fails required", "http.port: fails min=1024", "cache.ttl: fails required"}
+
+	assert.Equal(t, want, messages(t, err))
+
+	errs, ok := errors.AsType[configvalidator.Errors](fmt.Errorf("loading config: %w", err))
+	require.True(t, ok)
+	assert.Equal(t, want, messages(t, errs))
 }
 
 func TestSentinelStaysReachable(t *testing.T) {
@@ -311,6 +320,17 @@ func TestSentinelStaysReachable(t *testing.T) {
 	violation, ok := errors.AsType[*configvalidator.Error](err)
 	require.True(t, ok)
 	assert.Equal(t, "http.cert_path", violation.Key)
+}
+
+func TestEmptyErrorsReportsNothing(t *testing.T) {
+	type config struct {
+		Section NoViolations `mapstructure:"section"`
+	}
+
+	var cfg config
+
+	require.NoError(t, configvalidator.Validate(&cfg))
+	require.NoError(t, configvalidator.ValidateField(&cfg, &cfg.Section))
 }
 
 func TestValidConfig(t *testing.T) {

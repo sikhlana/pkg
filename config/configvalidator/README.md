@@ -10,10 +10,13 @@ None. `configvalidator` checks other modules' Configs, and the loader's, and has
 
 | Name | Description |
 |------|-------------|
-| Validate | Checks a config, through a pointer, and returns nil, one Error, or every Error joined. A nil config returns ErrNilConfig. |
-| ValidateField | Validates a field beneath a parent, both through pointers, and reports each violation under the field's key within the parent. Panics when the field isn't beneath the parent. |
+| Validate | Checks a config, through a pointer, and returns every violation as an Errors, or nil. A nil config returns ErrNilConfig. |
+| ValidateField | Validates a field beneath a parent, both through pointers, and returns each violation under the field's key within the parent, as an Errors, or nil. Panics when the field isn't beneath the parent. |
 | Validator | A config type with its own checks, beyond what its tags can say. |
 | Validator.Validate | Returns what's wrong with the value, or nil. Validate calls it on the outermost Validator in each branch. |
+| Errors | Every violation Validate found, each an Error, in the order found. A slice, so it ranges directly. |
+| Errors.Error | Returns each violation's message on its own line. |
+| Errors.Unwrap | Returns the violations, so errors.Is and errors.AsType check each one. |
 | Error | One violation: a config key and what's wrong there. |
 | Error.Key | The dotted config key, such as http.port, hosts[2] or databases.reporting, or empty for the config as a whole. |
 | Error.Err | What's wrong: a RuleError for a failed tag, or what a Validator returned. |
@@ -67,7 +70,18 @@ log.format: fails oneof=text json
 
 Keys follow the mapstructure tags, so they match what an operator writes in a config file. An untagged field uses its Go name, a squashed field adds no segment, a slice element is `hosts[2]` and a map value is `databases.reporting`. A failed tag names the rule and its parameter, never the value, since config values include secrets.
 
-`Validate` returns a single `*configvalidator.Error`, or several joined with `errors.Join`. `errors.AsType[*configvalidator.Error]` finds the first, `Unwrap() []error` on the joined error lists them all, and `errors.AsType[*configvalidator.RuleError]` tells a failed tag apart from a failed `Validate` method.
+`Validate` returns a `configvalidator.Errors`, a slice holding one `*configvalidator.Error` per violation, even when there's only one. `errors.AsType` finds it through any wrapping:
+
+```go
+if errs, ok := errors.AsType[configvalidator.Errors](err); ok {
+	for _, violation := range errs {
+		v, _ := errors.AsType[*configvalidator.Error](violation)
+		fmt.Println(v.Key)
+	}
+}
+```
+
+`errors.Is` and `errors.AsType` also look inside each violation, so `errors.AsType[*configvalidator.Error]` finds the first one, and `errors.AsType[*configvalidator.RuleError]` tells a failed tag apart from a failed `Validate` method.
 
 #### Validate methods
 
@@ -122,7 +136,7 @@ func (c MessagingConfig) Validate() error {
 
 With mode `amqp` and no URL, that reports `messaging.amqp.url: fails required`. `ValidateField` adds the field's key, `amqp`, and the walk adds the method's, `messaging`. `Validate(&c.AMQP)` would report `messaging.url` instead. An unknown mode fails its `oneof` rule, so the method isn't called for one.
 
-Return `ValidateField`'s result directly, or join several with `errors.Join`. Keys compose through `*Error` values and joins only, so wrapping a result in `fmt.Errorf` keeps its text but reports it all at the method's key. `ValidateField` panics when the field isn't beneath the receiver: that's a bug in the method, found by the first test of that mode.
+Return `ValidateField`'s result directly, or combine several with `errors.Join`, which drops the nil ones. Keys compose through `*Error` values, `Errors` and joins only, so wrapping a result in `fmt.Errorf` keeps its text but reports it all at the method's key. `ValidateField` panics when the field isn't beneath the receiver: that's a bug in the method, found by the first test of that mode.
 
 #### Slices and maps
 

@@ -2,7 +2,6 @@ package configvalidator
 
 import (
 	"cmp"
-	"errors"
 	"fmt"
 	"iter"
 	"reflect"
@@ -14,15 +13,16 @@ import (
 // mode or invariants across fields. Validate calls the method on the outermost Validator in each branch of a config,
 // which then owns that branch: nothing beneath it is searched for Validate methods.
 //
-// To check a field, return configvalidator.ValidateField(c, &c.Field), or join several such results with errors.Join.
+// To check a field, return configvalidator.ValidateField(c, &c.Field), or combine several such results with errors.Join,
+// which drops the nil ones.
 // Each violation is then reported under the field's full key. A Validate method must not pass its own receiver to
 // Validate, which would call the method again.
 type Validator interface {
 	Validate() error
 }
 
-// Validate checks cfg and returns every violation it finds, or nil when there are none. A single violation is
-// returned as an *Error, several as an errors.Join of them, and each names the config key it's about.
+// Validate checks cfg and returns every violation it finds as an Errors, or nil when there are none. Each violation
+// is an *Error naming the config key it's about.
 //
 // It runs in two passes. First the validate tags on every exported field reachable through struct fields and non-nil
 // pointers are evaluated, except beneath a field tagged validate:"-". Then cfg is walked through struct fields,
@@ -51,7 +51,7 @@ func Validate[T any](cfg *T) error {
 
 	w.visit(root, "")
 
-	return combine(w.violations)
+	return w.violations.orNil()
 }
 
 // ValidateField validates field, which must point to a value beneath the one parent points to, and reports each
@@ -83,7 +83,7 @@ func ValidateField[P, F any](parent *P, field *F) error {
 		return nil
 	}
 
-	return combine(prefix(key, err))
+	return prefix(key, err).orNil()
 }
 
 // findField returns the key of the value target points to, which must sit beneath v, whose key is key. v itself is
@@ -132,24 +132,12 @@ func isAt(v, target reflect.Value) bool {
 	return v.CanAddr() && v.Type() == target.Type().Elem() && v.Addr().UnsafePointer() == target.UnsafePointer()
 }
 
-// combine returns nil when there are no violations, the violation when there's one, and all of them joined otherwise.
-func combine(violations []error) error {
-	switch len(violations) {
-	case 0:
-		return nil
-	case 1:
-		return violations[0]
-	default:
-		return errors.Join(violations...)
-	}
-}
-
 // walker finds the Validators in a config and collects what they return.
 type walker struct {
 	// failed holds the key of every tag violation.
 	failed []string
 
-	violations []error
+	violations Errors
 }
 
 // visit calls the outermost Validators at or beneath v, whose key is key.

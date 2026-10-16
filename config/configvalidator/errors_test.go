@@ -36,7 +36,29 @@ func TestErrorUnwraps(t *testing.T) {
 	err := &configvalidator.Error{Key: "http", Err: fmt.Errorf("checking ports: %w", errBoom)}
 
 	require.ErrorIs(t, err, errBoom)
-	require.ErrorIs(t, errors.Join(err, &configvalidator.Error{Key: "cache", Err: errors.New("other")}), errBoom)
+}
+
+func TestErrors(t *testing.T) {
+	port := &configvalidator.Error{Key: "http.port", Err: &configvalidator.RuleError{Tag: "min", Param: "1024"}}
+	cert := &configvalidator.Error{Key: "http.cert_path", Err: errBoom}
+	err := fmt.Errorf("validating config: %w", configvalidator.Errors{port, cert})
+
+	require.EqualError(t, err, "validating config: http.port: fails min=1024\nhttp.cert_path: boom")
+	require.ErrorIs(t, err, errBoom)
+
+	errs, ok := errors.AsType[configvalidator.Errors](err)
+	require.True(t, ok)
+	assert.Equal(t, configvalidator.Errors{port, cert}, errs)
+
+	violation, ok := errors.AsType[*configvalidator.Error](err)
+	require.True(t, ok)
+	assert.Same(t, port, violation)
+
+	rule, ok := errors.AsType[*configvalidator.RuleError](err)
+	require.True(t, ok)
+	assert.Equal(t, "min", rule.Tag)
+
+	assert.EqualError(t, configvalidator.Errors{cert}, "http.cert_path: boom")
 }
 
 func TestPrefix(t *testing.T) {
@@ -97,6 +119,15 @@ func TestPrefix(t *testing.T) {
 			want: []string{"amqp.url: boom", "amqp: boom", "amqp.queue: boom"},
 		},
 		{
+			name: "Errors",
+			key:  "amqp",
+			err: configvalidator.Errors{
+				&configvalidator.Error{Key: "url", Err: errBoom},
+				configvalidator.Errors{&configvalidator.Error{Key: "queue", Err: errBoom}},
+			},
+			want: []string{"amqp.url: boom", "amqp.queue: boom"},
+		},
+		{
 			name: "wrapped keyed error is opaque",
 			key:  "http",
 			err:  opaque,
@@ -126,10 +157,13 @@ func TestPrefix(t *testing.T) {
 func TestPrefixLeavesItsInputAlone(t *testing.T) {
 	child := &configvalidator.Error{Key: "url", Err: errBoom}
 	joined := errors.Join(child, &configvalidator.Error{Key: "queue", Err: errBoom})
+	errs := configvalidator.Errors{child}
 
 	configvalidator.Prefix("amqp", child)
 	configvalidator.Prefix("messaging", joined)
+	configvalidator.Prefix("broker", errs)
 
 	assert.Equal(t, &configvalidator.Error{Key: "url", Err: errBoom}, child)
-	assert.EqualError(t, joined, "url: boom\nqueue: boom")
+	require.EqualError(t, joined, "url: boom\nqueue: boom")
+	assert.Equal(t, configvalidator.Errors{child}, errs)
 }

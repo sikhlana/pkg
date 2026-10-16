@@ -86,10 +86,10 @@ context: |
   fx integration:
   - A package that owns state, runs work, or wires services exports an
     fx.Module variable named exactly Module. Utility packages, pure
-    function primitives and <module>test/ packages don't. The one
+    function primitives and testing/<module>test doubles don't. The one
     exception is config/configloader: its provider is generic over the
     app's config type, so it's a function, Provide[T], not a variable.
-  - fx.Module names are the module's package name ("logger",
+  - fx.Module names are the module's package name ("log",
     "configloader").
   - Every constructor registered with fx.Provide takes a single Params
     struct embedding fx.In, even for one dependency. Name it Params, or
@@ -158,8 +158,8 @@ context: |
     build it.
 
   Code standards:
-  - Constructors don't repeat the package name: logger.New, not
-    logger.NewLogger. Use New<Type> only when a package has several
+  - Constructors don't repeat the package name: log.New, not
+    log.NewLogger. Use New<Type> only when a package has several
     principal types.
   - Receivers: values for small immutable structs (configs, tokens);
     pointers when a method mutates, the struct is large, or it holds a
@@ -167,13 +167,19 @@ context: |
     small and immutable, so errors.AsType has a single target; a slice
     of errors (configvalidator.Errors) takes value receivers instead,
     as go/scanner.ErrorList does, so callers range over it directly.
-    Never mix receivers on one type.
+    Never mix receivers on one type, with one exception: decode
+    methods (UnmarshalText, UnmarshalJSON and the like) take a pointer
+    receiver on a type whose other methods take values, as slog.Level
+    does, so its constants still satisfy encoding.TextMarshaler.
   - Errors: lowercase gerund, no trailing period, wrapped with %w
     ("creating client: %w"). Documented failure modes are exported
     sentinels checked with errors.Is. Use errors.AsType[T], not
     errors.As.
   - Modules log through an injected *slog.Logger, never through the
-    slog or log package-level functions.
+    standard library's slog or log package-level functions.
+  - Logging calls pass typed attributes (slog.String, slog.Int,
+    slog.Duration, slog.GroupAttrs), never key-value pairs, with
+    slog.Any only where no typed constructor fits.
   - Godoc every exported symbol, minimally: start with the name, say
     what it does and any non-obvious behaviour (concurrency, side
     effects, error semantics). Don't restate the signature.
@@ -210,7 +216,10 @@ context: |
     go generate ./... after changing a mocked interface. mockgen comes
     from PATH, never go run …@latest.
   - Doubles that consumers need (spies, in-memory fakes) live in
-    <module>test/.
+    testing/<module>test, each its own module, as the standard
+    library's testing/slogtest does. A module's own tests never import
+    its double: each go.mod would require the other, and neither could
+    release first.
   - Fixture helpers that marshal panic on error, or take *testing.T and
     require.NoError; never discard the error.
   - Tests that need external services or run long skip under -short.
@@ -223,8 +232,10 @@ context: |
     linter where one exists, otherwise forbidigo with a message naming
     X. From this block: the t.Fatal family (testify), errors.As
     (errors.AsType), context.Background and context.TODO in tests
-    (t.Context), and package-level slog and log calls (an injected
-    *slog.Logger). wsl_v5 enforces the empty-line rule: its default
+    (t.Context), package-level calls in the standard library's slog
+    and log packages (an injected *slog.Logger), and key-value pairs in
+    logging calls (typed attributes, through sloglint's attr-only).
+    wsl_v5 enforces the empty-line rule: its default
     checks plus empty lines after blocks, with nothing cuddled above a
     block. A defer sharing a variable with the line above is let back
     in by an exclusion on wsl_v5's "too many statements above defer"
@@ -243,8 +254,9 @@ context: |
     ├── mymodule.go                   implementation
     ├── module.go                     Module, AsX/WithX helpers
     ├── runner.go                     when it owns a long-running loop
-    ├── *_test.go
-    └── mymoduletest/                 optional consumer-facing doubles
+    └── *_test.go
+    testing/mymoduletest/             optional consumer-facing doubles,
+                                      a module of its own
 
   - A nested module lives at <group>/<group><name> (config/configloader,
     http/httpserver), and its package name equals its directory name.
@@ -252,12 +264,17 @@ context: |
     needs, the package name is the module's identity: its fx.Module
     name, the <module> segment of its name and group tags, its spec
     folder and its commit scope.
+  - Consumer-facing doubles are the one exception to
+    <group>/<group><name>: they live at testing/<module>test
+    (testing/logtest), and their package name still equals their
+    directory name.
 
   Documentation:
   - A module README has, in order: title; a one- or two-sentence
     overview; ## Configuration (Field, Type, Description);
     ## Exported Members (Name, Description); ## Usage with Standalone
-    and With fx subsections; ## Test Helpers when <module>test/ exists.
+    and With fx subsections; ## Test Helpers when testing/<module>test
+    exists.
   - Exported Members lists every exported symbol the module commits
     to: types, functions, constants, methods (qualified, as in
     Client.Do) and struct fields that are part of the API. Config
@@ -276,8 +293,8 @@ context: |
     for anything else use kebab-case folder names (release-ci).
   - Specs hold the behavioural guarantees a module makes to consumers.
     Project-wide patterns live in this block, not in per-module specs.
-  - A <module>test/ package is specced only when consumers depend on
-    its behaviour.
+  - A testing/<module>test package is specced only when consumers
+    depend on its behaviour.
 
 rules:
   proposal:

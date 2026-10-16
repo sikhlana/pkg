@@ -274,6 +274,10 @@ linters:
         - ".*"
 
     sloglint:
+      # Enforce using attributes only (overrides no-mixed-args, incompatible with kv-only).
+      # https://github.com/go-simpler/sloglint?tab=readme-ov-file#attributes-only
+      # Default: false
+      attr-only: true
       # Enforce not using global loggers.
       # Values:
       # - "": disabled

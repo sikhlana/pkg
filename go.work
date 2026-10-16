@@ -4,5 +4,6 @@ use (
 	./cli
 	./config/configloader
 	./config/configvalidator
+	./kernelrun
 	./log
 )

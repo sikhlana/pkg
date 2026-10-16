@@ -189,6 +189,9 @@ linters:
         - pattern: ^errors\.As$
           pkg: ^errors$
           msg: Use errors.AsType[T] instead.
+        - pattern: ^fx\.Shutdowner$
+          pkg: ^go\.uber\.org/fx$
+          msg: Return from a kernelrun runner instead; kernelrun.Run never listens for a shutdown request.
 
     funcorder:
       # Checks if the exported methods of a structure are placed before the non-exported ones.

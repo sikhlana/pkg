@@ -356,7 +356,7 @@ What changed while applying the first pull request, and why.
 - **Fixed in review:** `Validate` on a `T` of interface type panicked in the tag pass, which took the address of a value it had reached through the interface. The tag pass now hands go-playground the struct value. `ValidateField` couldn't find a field behind an interface field holding a pointer; it now looks through interfaces as the walk does.
 - **`plan` selects every module, not just the new one.** Tasks 8.1 and 18.1 (since dropped, below) expected `plan` to print only the new module, but registering it changes `go.work`, which selects every module for lint and test (release-ci spec). `check` still covers only the new module. The tasks were corrected.
 - **`Errors` replaced `errors.Join`** at the user's request, after the first draft of the pull request. Validate and ValidateField return it for any number of violations, which also settles the open question of a helper to list them. The constitution's receiver rule gained an exception for slice error types.
-- **Open for the second pull request: `,remain`.** The loader must recognise a `,remain` field, which takes no env names and makes its level accept any key. The shared key rules don't cover it, so either the loader reads that tag option itself, or `config/configvalidator` gains a helper, which after `v0.1.0` means a 0.2.0 release first.
+- **Open for the second pull request: `,remain`.** The loader must recognise a `,remain` field, which takes no env names and makes its level accept any key. The shared key rules don't cover it, so either the loader reads that tag option itself, or `config/configvalidator` gains a helper, which after `v0.1.0` means a 0.2.0 release first. Resolved in the second pull request: the loader reads the tag option itself (decision 12), so `config/configvalidator` didn't need a release.
 
 - **Release steps left the task list.** Sections 8 and 18 (local `plan` and `check`, opening each pull request, the published release and a consumer check) were dropped, and the sections after 8 renumbered. A new constitution rule keeps steps outside the branch out of task lists, since an unticked one would hold the change back from archiving. The Migration Plan keeps the checks worth making.
 
@@ -419,4 +419,12 @@ A second review, of `ef32d45`, found eight more. Each is fixed with a regression
 - **An unreadable default was skipped without an error.** Reaching it actually panicked first, in `entryName`, on a map key read through an unexported embedded field. → `entryName` doesn't assert on a key it can't read, and an unreadable default fails the table build.
 - **`walkEntries` repeated a root-key special case.** → The prefix is computed once.
 - **Found while fixing:** the loader's `entryName` fell back to `fmt.Sprint`, so a key type with a display-only `String` method was named differently from `configvalidator`'s keys. → It follows `configvalidator`'s rule: text form, then underlying value. The two copies stay in step by hand until `configvalidator` exports the rule, which would need its own minor release first.
+
+## Follow-ups left open
+
+- **Map entries are named in two places.** `config/configloader` copies `config/configvalidator`'s rule for naming a map entry (text form, then underlying value). Exporting it from `config/configvalidator` would let the loader import it, but that needs a minor release of `config/configvalidator` first.
+- **The planned kernel module wires the pieces together:** `cli`'s `--config` into `configloader.WithFilename`, and `log.Module`'s logger into the loader. Neither module imports the other, by design.
+- **`XDG_CONFIG_HOME` isn't consulted.** The search uses `$HOME/.config/<name>` as written. Revisit if a user asks for it.
+- **The wording of rule failures** (`fails min=1024`) and **a constitution line preferring text-decoded field types** stay open, as listed under Open Questions.
+- **Nil-pointer dereferences hang the development machine** (go1.27.2, darwin/arm64), whether recovered or not, inside or outside the sandbox, while other panics exit normally. No test here triggers one, but any test that did would hang locally instead of failing. It's worth reproducing with a plain program and reporting upstream.
 

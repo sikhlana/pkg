@@ -14,6 +14,18 @@ A Config that picks one of several implementations (a file queue or AMQP, say) h
 
 Instead, each mode-specific field is tagged `validate:"-"`, so the tag pass never enters it, and the parent's `Validate` method checks the active one with `configvalidator.ValidateField(&c, &c.AMQP)`. That runs the full check (tags, then `Validate` methods) on the active struct, with each violation under the field's key, so the operator reads `messaging.amqp.url`, a key they can write, not `messaging.url`. `ValidateField` finds the field by address rather than taking its key as a string, so the key can't drift from the mapstructure tag, and it works with value receivers because both pointers point into the same copy.
 
+## Where the search looks
+
+An explicit config file is the only file read. Without one, the first file found wins, most specific place first: `config.<ext>` in the app's extra search directories, then `.<name>.<ext>` in the working directory, then `config.<ext>` in `$HOME/.config/<name>/`, `$HOME/.<name>/` and `/etc/<name>/`.
+
+- **The working directory's file is named after the app,** so a project's unrelated `config.yaml` is never read. That's what lets it come ahead of the user's files, as a project-local `.golangci.yml` does.
+- **The user's directories come before `/etc`.** With the first file winning, a system-wide file would otherwise shadow a user's own.
+- **Only formats viper can decode are tried,** so a stray `config.ini` never stops the search.
+- **`$HOME/.config` is used as written,** on macOS too, rather than `os.UserConfigDir()`, whose macOS answer is `~/Library/Application Support`.
+- **A file that fails to parse is reported by format and position only.** Parsers quote what they choke on (dotenv quotes the whole line), and a typo beside a secret would put the secret in the error.
+
+Viper's own search looks for one file name across directories, so the loader searches itself and hands viper the file it found.
+
 ## Layering
 
 The loader builds the config from three layers, each overriding the one before for the keys it sets: typed defaults, the config file and the environment.
@@ -51,4 +63,4 @@ That rule is why a Config never has both `x` and `x_file`: the second's env name
 
 The loader reports through a `*slog.Logger` it's given: `Options.Logger`, or under fx the app's logger, which `log.Module` provides. It doesn't import `log`, since `*slog.Logger` is the standard library's type, and there's no cycle: `log` builds its logger from developer wiring alone, so the logger exists before any config is loaded.
 
-It reports, at Info, which file it read or that the search found none, with the directories searched, which answers the question the search raises on every start. At Debug it names each key set from the environment or read through a `_FILE` variable, and at Warn each unknown key it ignored, which turns `AllowUnknownKeys` from silently swallowing typos into flagging them. Records name keys, variables and paths, never values, the same rule errors follow, because config holds secrets. Failures aren't logged: they're the returned error, and logging them as well would report them twice.
+It reports, at Info, which file it read or that the search found none, with the places searched, which answers the question the search raises on every start. At Debug it names each key set from the environment or read through a `_FILE` variable, and at Warn each unknown key it ignored, which turns `AllowUnknownKeys` from silently swallowing typos into flagging them. Records name keys, variables and paths, never values, the same rule errors follow, because config holds secrets. Failures aren't logged: they're the returned error, and logging them as well would report them twice.

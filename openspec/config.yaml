@@ -64,6 +64,24 @@ context: |
     VERSION and is never released. The code and test standards apply
     to it; the module layout, README and spec rules don't.
 
+  Commits and pull requests:
+  - Commit messages and pull request titles follow Conventional
+    Commits 1.0: <type>(<scope>)!: <description>. Squash merges put
+    the pull request title on main as the commit subject, with the
+    pull request body as its message, so the title is what lasts and
+    CI checks it. Branch commits follow the same form.
+  - Types: feat, fix, perf, refactor, test, docs, build (go.mod and
+    dependencies), ci (workflows and tools/release), chore, revert.
+  - The scope is the directory of the one module or tool a change
+    touches (cli, http/server, tools/release), or openspec for a
+    spec-only change. Leave it out when a change spans several.
+  - ! marks a breaking change to a module's exported API at any
+    version, even before 1.0, where it takes only a minor bump.
+  - The description is lowercase and imperative, with no trailing
+    period: "feat(cli): add Main and CommandFunc".
+  - The type never sets a version. VERSION and the gorelease floor do,
+    so a feat that adds exports still bumps VERSION by hand.
+
   fx integration:
   - A package that owns state, runs work, or wires services exports an
     fx.Module variable named exactly Module. Utility packages, pure

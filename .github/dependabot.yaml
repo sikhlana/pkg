@@ -10,6 +10,10 @@ updates:
       - /.github/actions/*
     schedule:
       interval: weekly
+    # Conventional Commits titles (openspec/config.yaml): ci(deps): bump ...
+    commit-message:
+      prefix: ci
+      include: scope
 
   - package-ecosystem: gomod
     directory: /tools/release
@@ -22,3 +26,7 @@ updates:
         dependency-type: all
     schedule:
       interval: weekly
+    # Conventional Commits titles (openspec/config.yaml): build(deps): bump ...
+    commit-message:
+      prefix: build
+      include: scope

@@ -1,0 +1,46 @@
+name: PR title
+
+# Squash merges make the PR title main's commit subject, so the title is what
+# has to be a Conventional Commit. edited re-checks a retitled PR without a new
+# commit; synchronize gives each new head commit its own result, which branch
+# protection needs. Kept out of ci.yaml: re-running CI on every edit would be
+# wasteful, and skipping its jobs on edits would let CI OK pass for a head
+# commit whose lint failed.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    name: PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Check the title is a Conventional Commit
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          # The constitution's types: openspec/config.yaml, Commits and pull requests.
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            test
+            docs
+            build
+            ci
+            chore
+            revert
+          subjectPattern: ^[a-z].*[^.]$
+          subjectPatternError: |
+            The description "{subject}" in "{title}" must start with a lowercase letter and must not end with a period.

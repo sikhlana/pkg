@@ -50,7 +50,7 @@ CI sets a floor under the bump: [gorelease](https://pkg.go.dev/golang.org/x/exp/
 
 Release flow:
 
-1. Change a module and bump its `VERSION` in the same PR. A new module starts at `0.1.0`.
+1. Change a module and bump its `VERSION` in the same PR. A new module starts at `0.1.0`. Title the PR as a [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/), such as `feat(cli): add Main`: squash merges make it the commit on `main`, and CI checks it.
 2. CI lints and tests the changed modules (every module when `.go-version`, `.golangci.yml` or `go.work` changes) with `GOWORK=off`, so each builds against its siblings' published versions. It also checks that:
    - every changed module's `VERSION` is a plain `MAJOR.MINOR.PATCH` whose major the module path takes, higher than on `main` and not already tagged;
    - each `VERSION` meets the API-diff floor;

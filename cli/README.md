@@ -15,6 +15,8 @@ None. `cli` runs in `main`, before any configuration is loaded. The root command
 | SignalError.Signal | The signal that cancelled the context. |
 | SignalError.Error | Returns the signal's name followed by signal received, such as interrupt signal received. |
 | SignalError.Is | Reports whether the target is context.Canceled. |
+| Main | Runs a program: starts SignalContext, builds the command tree, runs it with Execute and exits with its code. Never returns. |
+| CommandFunc | A function returning a program's root command, as Main takes it. |
 | Execute | Runs a command tree's root with a context, given to every command in the tree, and returns the process exit code for its result. |
 | ExitError | An error that chooses the process exit code, returned from a command directly or wrapped. |
 | ExitError.Code | The exit code. Codes outside 1 to 255 exit 1. |
@@ -40,15 +42,13 @@ None. `cli` runs in `main`, before any configuration is loaded. The root command
 
 ### Standalone
 
-`main` calls `os.Exit` with the code from a separate function, so deferred calls such as `stop` run first:
+`main` hands `Main` the function that builds the command tree:
 
 ```go
 package main
 
 import (
-	"context"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -56,17 +56,14 @@ import (
 )
 
 func main() {
-	os.Exit(run())
+	cli.Main(newRoot)
 }
 
-func run() int {
-	ctx, stop := cli.SignalContext(context.Background())
-	defer stop()
-
+func newRoot() *cobra.Command {
 	root := cli.NewRootCommand("myapp", "Does my thing")
 	root.AddCommand(cli.NewVersionCommand(), newServeCommand())
 
-	return cli.Execute(ctx, root)
+	return root
 }
 
 func newServeCommand() *cobra.Command {
@@ -76,7 +73,7 @@ func newServeCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path, err := cmd.Flags().GetString(cli.ConfigFlag)
 			if err != nil {
-				return err
+				return fmt.Errorf("reading the config flag: %w", err)
 			}
 
 			fmt.Fprintln(cmd.OutOrStdout(), "serving with", path)
@@ -86,6 +83,21 @@ func newServeCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+```
+
+`Main` installs the signal handler before calling `newRoot`, runs the tree under the signal-aware context, releases the handler and only then calls `os.Exit`, which would skip it if deferred. A program that needs something else between those steps uses the parts directly, keeping `os.Exit` out of the function that defers `stop`:
+
+```go
+func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	ctx, stop := cli.SignalContext(context.Background())
+	defer stop()
+
+	return cli.Execute(ctx, newRoot())
 }
 ```
 

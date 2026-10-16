@@ -122,7 +122,27 @@ Alternative: drop the subcommand and keep only `--version`. It's kept because `m
 - **Cobra tests** build commands with `NewRootCommand` and capture output with `SetOut`, `SetErr` and `SetArgs`. They cover: error printed without usage, quiet exit, `--version` matching the subcommand, and `--config` reaching a subcommand.
 - **Checked by hand, not in tests:** whether `-X` and VCS stamping actually reach the binary is go-command behaviour, so it's in the task list. Automating it would need a scratch module with a `replace` directive and an offline module cache, which is heavy for confirming what the toolchain already guarantees.
 
-### 10. Dependencies
+### 10. Main and CommandFunc
+
+Added in the follow-up release (0.2.0). It's also what tests the bump rule: new exports make gorelease suggest a minor version.
+
+Every program's `main.go` repeated the same lines: start the signal context, defer `stop`, run `Execute`, all inside a helper so that `os.Exit` runs after the deferred `stop`. `Main(root CommandFunc)` is those lines, written once. `CommandFunc` is `func() *cobra.Command`, the shape a program's `cmd.Root` already has, so `main` is `cli.Main(cmd.Root)`.
+
+- **A function, not a command.** `Main` calls `root` after the signal handler is installed. A signal that arrives while the tree is being built then cancels the context instead of killing the process.
+- **The work happens in an unexported `run`.** `os.Exit` skips deferred calls, so `run` defers `stop` and returns the code, and `Main` only exits. That's also the split gocritic's `exitAfterDefer` asks for.
+- **A named type.** `func Main(root func() *cobra.Command)` behaves the same with one export fewer. `CommandFunc` was kept because it names what a program passes, and gives the godoc somewhere to say it's called once.
+- **No context or options parameter.** `main` has no parent context, and nothing yet needs configuring. A program that needs something else between the steps uses `SignalContext` and `Execute` directly, as the README shows.
+
+Alternatives:
+- **`Main(root *cobra.Command)`,** which builds the tree before signal handling exists.
+- **A plain function parameter,** which drops the named type (above).
+
+Tests:
+- `run` is reached through `export_test.go`, for exit codes and the context commands get.
+- A Unix-only test sends SIGINT from inside the `CommandFunc`. It would kill the test binary if the handler weren't already installed; instead the command sees a `*SignalError` cause.
+- `Main` itself runs in a child re-run of the test binary, which must exit 7. A child that exits 0 can't be used, because Go's testing package fails a test that calls `os.Exit(0)`.
+
+### 11. Dependencies
 
 - **spf13/cobra:** subcommands, persistent flags, help, usage and shell completion. Scaffolding over it is the module's purpose, so hand-rolling isn't an option. It brings in spf13/pflag and inconshreveable/mousetrap (Windows only).
 - **stretchr/testify:** tests only, as the constitution requires.
@@ -151,6 +171,7 @@ There are no consumers of `github.com/sikhlana/pkg/cli`. Programs moving off `gi
 | -c path | --config path |
 | GitCommit, BuildDate | Revision, Time (commit time, from VCS when not set) |
 | NewVersionCommand(name) | NewVersionCommand() |
+| func main() { os.Exit(run()) } with SignalContext, Execute | func main() { cli.Main(cmd.Root) } |
 
 Merging publishes `cli/v0.1.0`. Rollback means fixing forward: 0.1.1, or 0.2.0 for an API fix, plus a `retract` directive if v0.1.0 is unusable.
 

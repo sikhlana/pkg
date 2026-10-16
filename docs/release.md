@@ -39,6 +39,8 @@ Two gaps are accepted:
 
 Immutable releases are on. A published release's tag can't be moved or deleted, which matches the module proxy, where a version is fixed once fetched. Mistakes are fixed forward with a new patch version.
 
+After creating a release, `publish` requests the new version from proxy.golang.org, so `go get <module>@v<version>` works straight away and pkg.go.dev picks it up. A failed request is only a warning: the tag is already public, and the proxy fetches it from GitHub on its first request anyway. The request doesn't refresh the proxy's `@latest` answer, which catches up on its own schedule. After `cli/v0.2.0` was published, `@latest` answered v0.1.0 for a while.
+
 ## "Latest" is GitHub's call
 
 A repository of independently versioned modules has no single latest release, so `publish` never asks GitHub to mark one. That doesn't stop GitHub: when no release is marked latest, it treats the newest full release as latest. Publishing `cli/v0.1.0` and then `cli/v0.2.0` showed the badge moving to each in turn. Leaving the flag out of the request would get the same result, so `publish` keeps sending `make_latest: false` rather than claim a choice it doesn't make. Marking releases as prereleases would hide the badge, but would mislabel stable releases.

@@ -175,7 +175,57 @@ There are no consumers of `github.com/sikhlana/pkg/cli`. Programs moving off `gi
 
 Merging publishes `cli/v0.1.0`. Rollback means fixing forward: 0.1.1, or 0.2.0 for an API fix, plus a `retract` directive if v0.1.0 is unusable.
 
+## What actually happened
+
+Deviations from the design as first written:
+
+- **The code review reshaped decisions 1, 2, 3, 6 and 8 before the first release** (next section). The decisions above describe what shipped. The most visible change: `SignalContext` owns its signal handler instead of using `NotifyContext`, and exports `SignalError`.
+- **`Main` and `CommandFunc` (decision 10) weren't in the original proposal.** They replaced the README edit that task 9.8 planned as the bump-rule check, and shipped as v0.2.0 in PR #6. The signature first suggested, `func(*cobra.Command) int`, couldn't receive the program's `cmd.Root`, so it became `func() *cobra.Command`.
+- **The PR branch merged `origin/main` in instead of rebasing,** keeping the never-amend rule. Squash merge made the difference invisible on `main`.
+
+Release verification, by hand (tasks 9 and 10):
+- **v0.1.0:** PR #5 merged as b52f67d, published by CI, installable through proxy.golang.org with sum.golang.org verification, and indexed on pkg.go.dev with the MIT license. A publish re-run changed nothing.
+- **Deliberate failures:** release check rejected a new module at 0.2.0, a go directive that didn't match `.go-version`, and a module missing from `go.work`, each with an annotation on the file to fix.
+- **v0.2.0:** PR #6 tested both VERSION floors before passing at 0.2.0, and merged as 5bfb74a:
+  - unbumped: "changed without a VERSION bump";
+  - 0.1.1: "API changes since v0.1.0 need at least 0.2.0".
+
+Findings:
+
+- **GitHub marks the newest full release latest** whatever `make_latest` says. release-ci's promise that releases are never marked latest couldn't hold, and was reworded in adopt-conventional-commits (#7).
+- **The proxy's `@latest` lags a publish.** v0.2.0 was fetchable straight away, because publish requests each new version, but `@latest` answered v0.1.0 for a while.
+- **A test binary started as a background job from a script inherits SIGINT ignored,** and a released handler goes back to ignoring it. The second-signal test sends SIGTERM for that reason.
+- **Go's testing package fails a test that calls `os.Exit(0)`,** so `Main`'s child-process test can only check a non-zero code.
+
+Follow-ups left open:
+
+- **Windows signal handling stays untested** (a non-goal). It compiles, and `os.Interrupt` and `syscall.SIGTERM` exist there.
+- **The `BuildInfo` wiring pattern** (the app passes build info to other modules) earns a `docs/` page when a second module consumes it.
+- **Signals and exit codes:** no 128+n mapping, by design. A program reads the `*SignalError` cause if it wants one.
+
+## Fixes from code review
+
+The review of 8c0dcd1 found twelve issues. All were fixed in 3e84368, before the first release:
+
+- **Signal handling.**
+  - A second signal could be swallowed between cancellation and `AfterFunc` releasing the handler, and the test covered for it with a fixed 100ms sleep. → Our own handler releases before cancelling (decision 1), and the test needs no delay.
+  - A process started with SIGINT ignored goes back to ignoring it once the handler is released. → The second-signal test sends SIGTERM, and the godoc and README name the case.
+  - SIGTERM was never tested. → The first-signal test covers both signals.
+  - The child process went unreaped when a check failed, and `Wait` ran before its output was read. → A `t.Cleanup` waits on it, and the output is read to EOF first.
+- **Exit codes.**
+  - `Exit(256, …)` exited 0. → Codes outside 1–255 exit 1 (decision 2).
+  - `Exit` returning `*ExitError` invited typed-nil helpers that panic. → It returns `error` (decision 3).
+  - `Error()` showed the raw code while the process exited with another. → Both share one normalisation.
+  - `Execute` didn't give its context to every command of a reused tree or when handed a subcommand. → It walks the tree (decision 2).
+- **Commands.**
+  - `-c` on every command panics when a subcommand defines it. → No shorthand (decision 6).
+  - The version subcommand drifted from `--version` after a program changed the root's `Version`. → It reads the root's `Version` (decision 8).
+- **README.**
+  - The exit-130 snippet printed an error and treated SIGTERM like SIGINT. → Deleted.
+  - Unquoted `-X` values broke on spaces. → Quoted, with an RFC 3339 commit-time command.
+
 ## Rollup at archive
 
-- **Constitution:** the error-type receiver exception (decision 4) is written in this change, not at archive.
-- **docs/:** none expected; the rest of this rationale is specific to `cli` and lives in its spec and README. If a later module consumes `BuildInfo`, the "app passes build info along" pattern may earn a `docs/` page then.
+- **Constitution:** the error-type receiver exception (decision 4) was written in this change.
+- **docs/release.md:** gains why publish requests each new version from the proxy, and that `@latest` follows later. "Latest" on GitHub was rolled up by adopt-conventional-commits (#7).
+- **No `docs/` page for `cli` itself.** The rest of this rationale is specific to `cli` and lives in its spec, README and this archive.

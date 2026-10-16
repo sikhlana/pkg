@@ -83,7 +83,7 @@ Alternatives:
 
 ### 4. Reporting: Error, errors.Join, and composition through direct returns
 
-Each violation is an `*Error{Key, Err}` with pointer receivers. `Error()` returns `key: <cause>`, or just the cause when the key is empty, and `Unwrap` returns `Err`. Validate returns nil, a single `*Error`, or the `errors.Join` of all of them. A nil config returns `ErrNilConfig`.
+Each violation is an `*Error{Key, Err}` with pointer receivers. `Error()` returns `key: <cause>`, or just the cause when the key is empty, and `Unwrap` returns `Err`. Validate returns nil or an `Errors`, a named `[]error` holding one `*Error` per violation, even when there's only one. `Errors` has value receivers, as `go/scanner.ErrorList` does, so callers range over it; its `Error()` puts each violation on its own line, and its `Unwrap() []error` lets `errors.Is` and `errors.AsType` check each one. It's never returned empty. A nil config returns `ErrNilConfig`.
 
 When the walk wraps what a Validator returned, at key K:
 - an `*Error` at the top becomes a new `*Error` with key `K.<its key>`; the original is never mutated;
@@ -106,7 +106,8 @@ Alternatives:
 - **Pointer identity behind an unchanged `Validate(&c.Child)`.** `Validate` would tag its errors with the child's address and the walk would look it up beneath the Validator. It only works for pointer receivers; with a value receiver the address points into a copy, and the segment is silently dropped.
 - **The author names the key,** as in `&Error{Key: "amqp", Err: Validate(&m.AMQP)}`. It needs no new export, but repeats the mapstructure tag as a string that can drift from it.
 - **Delegated keys stop at the Validator,** as in the original. Operators get `messaging.url`, a key they can't write.
-- **A custom multi-error type with a one-line rendering.** Join is standard and works with `errors.Is` and `errors.AsType` out of the box. The cost is multi-line output, which cobra prints fine.
+- **`errors.Join`, with a single violation returned as a bare `*Error`.** It's standard, but callers handle two shapes and get the list back only through an anonymous `Unwrap() []error` assertion. `Errors` is one shape, found with `errors.AsType[configvalidator.Errors]` through any wrapping, and it renders like a join.
+- **A one-line rendering.** Configs with many violations would make one unreadable line; multi-line output prints fine through cobra.
 - **Keeping the original's built-in "validating configuration" prefix.** Callers wrap with their own context per the constitution: the loader with `validating config: %w`, a module's provider with its own gerund.
 
 ### 5. Loader API: a plain generic Options struct, not functional options
@@ -248,7 +249,7 @@ func WithFilename(path string) fx.Option     // fx.Supply(AsFilename(path))
 
 ### 15. Testing
 
-- **config/configvalidator:** one test per spec scenario, with fixture types in `configvalidator_test`. Assertions use `errors.AsType[*configvalidator.Error]`, `errors.AsType[*configvalidator.RuleError]`, and `Unwrap() []error` for multiple violations.
+- **config/configvalidator:** one test per spec scenario, with fixture types in `configvalidator_test`. Assertions use `errors.AsType[*configvalidator.Error]`, `errors.AsType[*configvalidator.RuleError]`, and `Errors` for multiple violations.
 - **config/configloader:**
   - environment through `t.Setenv`, so no `t.Parallel`;
   - files in `t.TempDir()`, the home directory through `t.Setenv("HOME", …)`, the working directory through `t.Chdir`, and `SearchPaths` for the rest. Nothing reads the real `/etc`.
@@ -296,7 +297,6 @@ Rollback means fixing forward: 0.1.1, or 0.2.0 for an API fix, plus a `retract` 
 ## Open Questions
 
 - **The exact wording of rule failures** (`fails min=1024`, or something closer to prose). It changes no spec, since the spec only requires the rule and its parameter.
-- **A helper that lists every violation from a Validate or Load error.** `Unwrap() []error` covers it for now, and adding one later is a minor bump.
 - **A constitution line preferring text-decoded field types** (`slog.Level`, `netip.Prefix`) over strings parsed in resolvers. It's worth proposing once a ported module needs one.
 
 ## Implementation Notes
@@ -309,4 +309,5 @@ What changed while applying the first pull request, and why.
 - **The walk descends interface values** (decision 3, rule 5), copying their contents like map values, to match go-playground's tag pass. The spec now lists interface values in both requirements.
 - **Fixed in review:** `Validate` on a `T` of interface type panicked in the tag pass, which took the address of a value it had reached through the interface. The tag pass now hands go-playground the struct value. `ValidateField` couldn't find a field behind an interface field holding a pointer; it now looks through interfaces as the walk does.
 - **`plan` selects every module, not just the new one.** Tasks 8.1 and 18.1 expected `plan` to print only the new module, but registering it changes `go.work`, which selects every module for lint and test (release-ci spec). `check` still covers only the new module. The tasks were corrected.
+- **`Errors` replaced `errors.Join`** at the user's request, after the first draft of the pull request. Validate and ValidateField return it for any number of violations, which also settles the open question of a helper to list them. The constitution's receiver rule gained an exception for slice error types.
 - **Open for the second pull request: `,remain`.** The loader must recognise a `,remain` field, which takes no env names and makes its level accept any key. The shared key rules don't cover it, so either the loader reads that tag option itself, or `config/configvalidator` gains a helper, which after `v0.1.0` means a 0.2.0 release first.

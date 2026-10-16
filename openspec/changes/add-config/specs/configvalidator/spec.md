@@ -58,11 +58,15 @@ Validation SHALL NOT call a Validate method when a tag rule failed on that value
 
 ### Requirement: Every violation is reported
 
-Validation SHALL report every violation it finds, not only the first: every failing tag rule, and the failure of every Validate method it calls. It SHALL return no error when it finds none. Each violation SHALL be retrievable on its own as an error carrying its key, and an error returned by a Validate method SHALL stay matchable with errors.Is through the result.
+Validation SHALL report every violation it finds, not only the first: every failing tag rule, and the failure of every Validate method it calls. It SHALL return no error when it finds none. Each violation SHALL be retrievable on its own as an error carrying its key, and all of them SHALL be retrievable together as one list, even after the caller wraps the result with its own context. An error returned by a Validate method SHALL stay matchable with errors.Is through the result.
 
 #### Scenario: Violations in two sections
 - **WHEN** `http.port` and `cache.ttl` both fail their tag rules
 - **THEN** validation reports both, each with its own key
+
+#### Scenario: Violations survive the caller's wrapping
+- **WHEN** a caller wraps a result holding violations for `http.port` and `cache.ttl` with its own context
+- **THEN** both violations are still retrievable together, each with its key
 
 #### Scenario: Sentinel stays reachable
 - **WHEN** a Validate method returns an error wrapping a module's exported sentinel

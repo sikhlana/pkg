@@ -24,12 +24,14 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
 
 ## 3. Errors
 
-- [x] 3.1 `Error` (`Key`, `Err`) and `RuleError` (tag and parameter) with pointer receivers, and `ErrNilConfig`, as in design decisions 2 and 4:
+- [x] 3.1 `Error` (`Key`, `Err`) and `RuleError` (tag and parameter) with pointer receivers, `Errors` (a `[]error` with value receivers), and `ErrNilConfig`, as in design decisions 2 and 4:
   - `Error` renders `key: cause`, or the cause alone when the key is empty, and unwraps to `Err`;
-  - `RuleError` renders `fails tag=param`, or `fails tag`.
+  - `RuleError` renders `fails tag=param`, or `fails tag`;
+  - `Errors` renders each violation on its own line and unwraps to the violations.
 - [x] 3.2 The unexported composition from design decision 4: a key is prefixed onto a top-level `*Error`, onto each part of a joined error, and anything else becomes an opaque `*Error` at that key. The input is never mutated.
 - [x] 3.3 Tests:
-  - rendering with and without a key;
+  - rendering with and without a key, and an `Errors` of one and of two violations;
+  - `errors.AsType` finds the `Errors`, the first `*Error` and its `*RuleError` through a caller's wrapping;
   - composition of a single error, a joined error, a nested join, and an opaque `fmt.Errorf("…: %w", …)` wrapper;
   - the input is unchanged after composition;
   - `errors.Is` reaches a sentinel through `Error` and through a join.
@@ -53,7 +55,7 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
   - the walk stops at nil pointers, `validate:"-"` fields and text-decoded values;
   - it calls the outermost Validator, through the value or its address, unless a tag violation sits at or below its key;
   - it descends into struct fields, slice and array elements (`[i]`), map values (`.entry`) and interface values. Map values and interface contents are copied so pointer receivers are found;
-  - the result is nil, one `*Error`, or a join.
+  - the result is nil or an `Errors`, never an empty one.
   - `ValidateField[P, F any](parent *P, field *F) error`: finds field beneath parent by address, ignoring validate tags, and returns `Validate(field)` with each violation under field's key. A nil field returns `ErrNilConfig`; a field not beneath parent panics.
 - [x] 5.2 Tests for the spec requirements "A Validate method owns its branch", "A Validate method doesn't run on a branch whose tag rules failed", "Every violation is reported", "Delegated violations keep their full key" and "A nil config is an error":
   - the outermost method wins, and the walk finds methods below a plain parent;
@@ -79,7 +81,7 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
 - [x] 6.2 Write `config/configvalidator/README.md` in the constitution's order:
   - overview;
   - Configuration: none, and why;
-  - Exported Members: every export, including `Error.Key`, `Error.Err`, the `RuleError` fields, the methods, `ErrNilConfig`, `ValidateField` and both key-rule helpers;
+  - Exported Members: every export, including `Errors`, `Error.Key`, `Error.Err`, the `RuleError` fields, the methods, `ErrNilConfig`, `ValidateField` and both key-rule helpers;
   - Usage, Standalone: validating a hand-built Config; a mode-dispatching Validate method with `validate:"-"` that delegates with `ValidateField`; `dive` for element rules; the embedding caveat;
   - Usage, With fx: a Provider closure validating the Config it's handed (the module itself doesn't import fx).
   - No backticks in table cells.

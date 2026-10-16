@@ -164,8 +164,10 @@ context: |
   - Receivers: values for small immutable structs (configs, tokens);
     pointers when a method mutates, the struct is large, or it holds a
     mutex or channel. Error types take pointer receivers even when
-    small and immutable, so errors.AsType has a single target. Never
-    mix receivers on one type.
+    small and immutable, so errors.AsType has a single target; a slice
+    of errors (configvalidator.Errors) takes value receivers instead,
+    as go/scanner.ErrorList does, so callers range over it directly.
+    Never mix receivers on one type.
   - Errors: lowercase gerund, no trailing period, wrapped with %w
     ("creating client: %w"). Documented failure modes are exported
     sentinels checked with errors.Is. Use errors.AsType[T], not

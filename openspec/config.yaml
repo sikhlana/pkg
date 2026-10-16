@@ -36,21 +36,33 @@ context: |
     Minor: new exports. Major: breaking changes once a module is 1.0.
     Pre-1.0, breaking changes take a minor bump; 1.0 is a deliberate
     stability call, not a way to earn majors.
-  - A major past v1 moves the module path to <dir>/vN (semantic import
-    versioning), a new import path for every consumer. Treat it as a
-    last resort; prefer additive change.
-  - A module that has never been tagged stays at 0.1.0; edits before
-    its first tag don't bump.
+  - CI enforces a floor: VERSION must be at least the version gorelease
+    suggests from the exported-API diff against the module's last
+    release. The author can go higher (a behaviour change behind an
+    unchanged API), never lower.
+  - A module's path is the repo path followed by its directory. A major
+    past v1 therefore lives in a new <dir>/vN directory with module path
+    <repo>/<dir>/vN (semantic import versioning), a new import path for
+    every consumer; it's tagged <dir>/vN.x.y, as the go command expects.
+    Treat it as a last resort; prefer additive change.
+  - A new module starts at 0.1.0 (N.0.0 in a <dir>/vN directory), and
+    merging it publishes it. Later PRs bump it like any other module.
+    A removed module that comes back continues above its last release.
   - No replace directives in go.mod. go.work is committed; go.work.sum
     is not. Before merge, every go.mod requires published versions of
     its siblings, so interdependent modules release in dependency
     order, one PR per tier.
-  - Every go.mod and go.work declares the Go version in .go-version at
-    the repo root.
+  - Every go.mod and go.work declares the Go language version in
+    .go-version at the repo root; a patch release (go 1.27.1) is fine
+    when a dependency forces one.
   - The repo is MIT-licensed through a single root file named exactly
     LICENSE. go copies that file, by that name only, into every nested
     module's zip, and pkg.go.dev needs it there. Modules don't carry
     their own copy.
+  - tools/ holds repo tooling, not library modules. A tool has its own
+    go.mod, sits outside go.work and runs with GOWORK=off; it has no
+    VERSION and is never released. The code and test standards apply
+    to it; the module layout, README and spec rules don't.
 
   fx integration:
   - A package that owns state, runs work, or wires services exports an
@@ -141,6 +153,12 @@ context: |
     exported by design.
   - Interface-satisfaction checks (var _ Iface = T{}) go in _test.go
     files.
+  - Empty lines split a function body into its logical operations:
+    each one has an empty line before and after it, except at the
+    start or end of a block. Every block statement (if, for, switch,
+    select, and so on) has an empty line before and after it, too. The
+    one exception: an `if err != nil` stays directly under the call
+    that returned the error it checks.
   - Don't hand-fix formatting; golangci-lint --fix owns it.
 
   Testing:
@@ -173,7 +191,9 @@ context: |
     X. From this block: the t.Fatal family (testify), errors.As
     (errors.AsType), context.Background and context.TODO in tests
     (t.Context), and package-level slog and log calls (an injected
-    *slog.Logger).
+    *slog.Logger). wsl_v5 enforces the empty-line rule: its default
+    checks plus empty lines after blocks, with nothing cuddled above a
+    block.
   - golangci-lint runs from a module's directory and picks up the root
     .golangci.yml by walking up.
   - Verification, in order. On each touched module: modernize -fix,
@@ -230,7 +250,8 @@ rules:
       archive; design.md is a discussion surface, not its final home.
   tasks:
     - One VERSION bump task per touched module, stating patch, minor
-      or major. Skip modules that have never been tagged.
+      or major. Skip modules the change creates; they start at their
+      first version.
     - A README task for each module whose exports or Config change.
       A new module also gets tasks for its root README row and its
       go.work registration.

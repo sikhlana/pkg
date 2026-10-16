@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  # The version developers run locally.
+  GOLANGCI_LINT_VERSION: v2.14.0
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      modules: ${{ steps.plan.outputs.modules }}
+      empty: ${{ steps.plan.outputs.empty }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get the release tool
+        id: tool
+        uses: ./.github/actions/release-tool
+      - name: Select modules to lint and test
+        id: plan
+        env:
+          RELEASE: ${{ steps.tool.outputs.release }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          "${RELEASE}" plan --base "origin/${BASE_REF}"
+
+  lint:
+    name: Lint (${{ matrix.module }})
+    needs: plan
+    if: needs.plan.outputs.empty == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.plan.outputs.modules) }}
+    env:
+      GOWORK: "off"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache-dependency-path: ${{ matrix.module }}/go.mod
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: ${{ matrix.module }}
+
+  test:
+    name: Test (${{ matrix.module }})
+    needs: plan
+    if: needs.plan.outputs.empty == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.plan.outputs.modules) }}
+    env:
+      GOWORK: "off"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache-dependency-path: ${{ matrix.module }}/go.mod
+      - name: Run tests
+        working-directory: ${{ matrix.module }}
+        run: go test ./...
+
+  release-check:
+    name: Release check
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get the release tool
+        id: tool
+        uses: ./.github/actions/release-tool
+        with:
+          go: "true"
+      - name: Check versions and repo invariants
+        env:
+          RELEASE: ${{ steps.tool.outputs.release }}
+          GORELEASE: ${{ steps.tool.outputs.gorelease }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          "${RELEASE}" check --base "origin/${BASE_REF}" --gorelease "${GORELEASE}"
+
+  tools-release:
+    name: Lint and test tools/release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOWORK: "off"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache-dependency-path: tools/release/go.sum
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: tools/release
+      - name: Run tests
+        working-directory: tools/release
+        run: go test ./...
+
+  # The one check branch protection requires, by its name, CI OK. Skipped lint
+  # and test matrices count as passing.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [plan, lint, test, release-check, tools-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

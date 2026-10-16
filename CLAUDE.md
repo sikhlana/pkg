@@ -12,6 +12,7 @@ A personal library of reusable Go modules, wired through [Uber fx](https://uber-
 | <module>/README.md              | One module's Configuration, Exported Members and Usage                                                             |
 | openspec/specs/<module>/spec.md | The behavioural guarantees a module makes to consumers                                                             |
 | docs/<topic>.md                 | Why a cross-module pattern or trade-off is shaped the way it is                                                    |
+| tools/release/README.md         | The release CI tool: what plan, check and publish enforce on pull requests and main                                |
 
 ## Making a change
 
@@ -32,4 +33,14 @@ Then the short sweep across every module in `go.work`:
 
 ```bash
 go list -m -f '{{.Dir}}' | while IFS= read -r mod; do (cd "$mod" && go test -short ./...); done
+```
+
+`tools/release` sits outside `go.work`, so the sweep skips it. When you touch it, run the same chain from its directory with `GOWORK=off`:
+
+```bash
+cd tools/release
+GOWORK=off go generate ./...              # only if publish.Releases changed
+GOWORK=off modernize -fix ./...
+GOWORK=off golangci-lint run --fix ./...  # re-run without --fix if it changed files
+GOWORK=off go test ./...                  # -short skips the gorelease-backed tests
 ```

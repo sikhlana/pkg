@@ -11,7 +11,7 @@
   - **Migration:** a program that put `configloader.Provide` in `Options.Shared`, relying on the kernel to supply `WithFilename`, moves it into `Config` and passes the path as `Options.Filename`. Left in `Shared`, it still compiles, but `--config` no longer reaches it.
 - **`cli` (0.3.0): the root stops carrying `--config`. BREAKING.**
   - `NewRootCommand` no longer adds `--config`, and `ConfigFlag` is deleted.
-  - The root still claims no single-letter shorthand.
+  - The root still adds no flags or letters of its own, beyond cobra's `--help` and `--version`.
   - An app that bumps `cli` to 0.3.0 has to bump `kernel` to 0.2.0 or later with it: `kernel` 0.1.0 refers to `cli.ConfigFlag`.
 - **`config/configloader` (0.1.1):** its README's examples stop reading `cli`'s flag, and show the kernel's `Config` and a hand-defined flag instead.
 - **`kernel` (0.2.1):** requires `cli` 0.3.0 and drops the reuse of `cli`'s flag.
@@ -27,7 +27,7 @@ None.
 ### Modified Capabilities
 
 - `kernel`: the root command carries `--config` only when the program loads config, and a command's app loads config only then, with `--config`'s path.
-- `cli`: the root command no longer carries `--config`; the promise that it claims no single-letter shorthand stays, as a requirement of its own.
+- `cli`: the root command no longer carries `--config`; the promise that it adds no flags or letters of its own, beyond cobra's help and version flags, stays as a requirement of its own.
 
 ## Impact
 

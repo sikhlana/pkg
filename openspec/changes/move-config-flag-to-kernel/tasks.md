@@ -40,28 +40,38 @@ The review of step 1's working tree found eight issues. Six are fixed below and 
 
 ## 4. cli 0.3.0: the root stops carrying --config
 
-Sections 4 and 5 are the second pull request, `feat(cli)!:`, and wait for the first to merge, so `kernel` on main no longer refers to `cli.ConfigFlag`. See design decisions 4 and 5.
+Sections 4 to 6 are the second pull request, `feat(cli)!:`, and wait for the first to merge, so `kernel` on main no longer refers to `cli.ConfigFlag`. See design decisions 4 and 5.
 
-- [ ] 4.1 Once the first pull request has merged, branch `cli-drop-config-flag` off `origin/main` after `git fetch`.
-- [ ] 4.2 Bump `cli/VERSION` from 0.2.1 to 0.3.0, a minor for the breaking change before 1.0, and `config/configloader/VERSION` from 0.1.0 to 0.1.1, a patch for docs.
-- [ ] 4.3 `NewRootCommand` no longer adds `--config`, `ConfigFlag` is deleted, and the godoc says the root claims no single-letter shorthand.
-- [ ] 4.4 `cli` tests: the config-flag test goes; the root has no `--config`, so `--config` is an unknown flag; a subcommand's own `-c` still works.
-- [ ] 4.5 `cli/README.md`: Configuration without the `--config` sentence, the `NewRootCommand` row without the flag, no `ConfigFlag` row, and the Standalone example without reading the config path.
-- [ ] 4.6 `config/configloader`: the README's `WithFilename` row and With fx example stop reading `cli`'s flag, showing `kernel`'s `Options.Config` with `Filename: path` and a hand-defined flag for programs without `kernel`. `WithFilename`'s godoc stops naming `cli`'s flag.
+- [x] 4.1 Once the first pull request has merged, branch `cli-drop-config-flag` off `origin/main` after `git fetch`.
+- [x] 4.2 Bump `cli/VERSION` from 0.2.1 to 0.3.0, a minor for the breaking change before 1.0, and `config/configloader/VERSION` from 0.1.0 to 0.1.1, a patch for docs.
+- [x] 4.3 `NewRootCommand` no longer adds `--config`, `ConfigFlag` is deleted, and the godoc says the root claims no single-letter shorthand.
+- [x] 4.4 `cli` tests: the config-flag test goes; the root has no `--config`, so `--config` is an unknown flag; a subcommand's own `-c` still works.
+- [x] 4.5 `cli/README.md`: Configuration without the `--config` sentence, the `NewRootCommand` row without the flag, no `ConfigFlag` row, and the Standalone example without reading the config path.
+- [x] 4.6 `config/configloader`: the README's `WithFilename` row and With fx example stop reading `cli`'s flag, showing `kernel`'s `Options.Config` with `Filename: path` and a hand-defined flag for programs without `kernel`. `WithFilename`'s godoc stops naming `cli`'s flag.
 
 ## 5. cli 0.3.0 verification
 
-- [ ] 5.1 In `cli/` and `config/configloader/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
-- [ ] 5.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 5.1 and 5.2.
+- [x] 5.1 In `cli/` and `config/configloader/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
+- [x] 5.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 5.1 and 5.2.
 
-## 6. kernel 0.2.1: require cli 0.3.0
+## 6. cli 0.3.0 code review fixes
 
-Section 6 is the third pull request, `refactor(kernel):`, and waits for `cli/v0.3.0` to be published, since `kernel`'s go.mod requires it.
+The review of step 2's working tree found five issues. Four are fixed below; one, the main specs still describing the old `--config` until the archive, is left for step 3 as planned.
 
-- [ ] 6.1 Once `cli/v0.3.0` is published, branch `kernel-cli-0.3` off `origin/main` after `git fetch`.
-- [ ] 6.2 Bump `kernel/VERSION` from 0.2.0 to 0.2.1: a patch, for internals and a dependency.
-- [ ] 6.3 Require `cli` v0.3.0, and drop the adjusting of cli's flag: `RootCommand`'s check for an existing `--config`, the help swap and the hiding, and `Run`'s rejection with `errNoConfig`. `ConfigFlag`'s comment stops mentioning cli's flag.
-- [ ] 6.4 Tests: the reuse test goes; a program without `Config` rejects `--config ./app.yaml` before building an app, now as cobra's unknown flag; help without `Config` still shows no `--config`.
-- [ ] 6.5 `kernel/README.md`: drop any note about `cli`'s flag between releases.
-- [ ] 6.6 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`. Confirm `GOWORK=off go build ./...` and `go mod tidy -diff` are clean.
-- [ ] 6.7 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 6.6 and 6.7.
+- [x] 6.1 `NewRootCommand`'s godoc, the README row and the delta spec say what's true: the root adds no flags of its own, beyond cobra's `--help` (`-h`) and `--version` (`-v`, which cobra drops when another flag takes `v`). The new requirement is named "The root adds no flags of its own"; the `-c` test still covers the module claiming no letters.
+- [x] 6.2 `config/configloader`'s example for programs without `kernel` defines `--config` with `PersistentFlags`, so subcommands accept it, as they did with cli 0.2.1.
+- [x] 6.3 `kernel` 0.2.0's paths for cli's flag are exercised with `GOWORK=off go test ./...` in `kernel/`, against the published cli v0.2.1: the workspace now resolves cli 0.3.0, where the reuse test skips, and CI doesn't test `kernel` in this pull request. The reuse test runs and passes there.
+- [x] 6.4 The help test drops its `NotContains("--config")`; `TestRootHasNoConfigFlag` stays, as the spec's scenario.
+- [x] 6.5 Repeat 5.1 and 5.2, plus 6.3: lint reports 0 issues in `cli/` and `config/configloader/`, their full tests pass, `kernel`'s tests pass with `GOWORK=off`, and the `-short` sweep passes across all six modules.
+
+## 7. kernel 0.2.1: require cli 0.3.0
+
+Section 7 is the third pull request, `refactor(kernel):`, and waits for `cli/v0.3.0` to be published, since `kernel`'s go.mod requires it.
+
+- [ ] 7.1 Once `cli/v0.3.0` is published, branch `kernel-cli-0.3` off `origin/main` after `git fetch`.
+- [ ] 7.2 Bump `kernel/VERSION` from 0.2.0 to 0.2.1: a patch, for internals and a dependency.
+- [ ] 7.3 Require `cli` v0.3.0, and drop the adjusting of cli's flag: `RootCommand`'s check for an existing `--config`, the help swap and the hiding, and `Run`'s rejection with `errNoConfig`. `ConfigFlag`'s comment stops mentioning cli's flag.
+- [ ] 7.4 Tests: the reuse test goes; a program without `Config` rejects `--config ./app.yaml` before building an app, now as cobra's unknown flag; help without `Config` still shows no `--config`.
+- [ ] 7.5 `kernel/README.md`: drop any note about `cli`'s flag between releases.
+- [ ] 7.6 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`. Confirm `GOWORK=off go build ./...` and `go mod tidy -diff` are clean.
+- [ ] 7.7 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.6 and 7.7.

@@ -23,7 +23,7 @@ None of its own. `configloader` loads the app's Config; what it reads that Confi
 | Params.Filename | The config file supplied with AsFilename or WithFilename. Wins over Options.Filename; empty falls back to it. |
 | Params.Logger | The app's *slog.Logger, optional. Wins over Options.Logger. |
 | AsFilename | Annotates a string, or a constructor returning one, as the config file Provide reads. Wrap it in fx.Supply or fx.Provide. |
-| WithFilename | Supplies the config file Provide reads, such as cli's --config value. |
+| WithFilename | Supplies the config file Provide reads, such as a --config value. |
 | ErrInvalidName | Options.Name is empty, starts with a digit, or holds a character other than ASCII letters, digits, - and _. |
 | ErrEnvNameCollision | Two keys would share an env name, or one key's env name is another's _FILE name. Names both keys. |
 | ErrMalformedFile | The config file can't be parsed. Names the file, its format and the position the parser reports, never the parser's message. |
@@ -136,12 +136,27 @@ Records name keys, env variables and paths, never a value. Failures are returned
 
 ### With fx
 
-`Provide` loads the config once, when something in the graph needs it, and provides it. Pass `cli`'s `--config` value through `WithFilename`, and list `log.Module` so the loader reports through the app's logger:
+`Provide` loads the config once, when something in the graph needs it, and provides it. A program built with [kernel](../../kernel) returns it from `kernel.Options.Config`, passing `--config`'s path as `Options.Filename`; the kernel lists `log.Module` ahead of it, so the loader reports through the app's logger:
+
+```go
+app := kernel.New(kernel.Options{
+	Config: func(path string) fx.Option {
+		return configloader.Provide(configloader.Options[Config]{
+			Name:     "my-svc",
+			Filename: path,
+			Defaults: Config{HTTP: HTTPConfig{Port: 8080}},
+		})
+	},
+})
+```
+
+A program without `kernel` defines the flag itself and passes its value through `WithFilename`, listing `log.Module` for the same reason:
 
 ```go
 root := cli.NewRootCommand("my-svc", "My service")
+root.PersistentFlags().String("config", "", "path to the config `file`")
 root.RunE = func(cmd *cobra.Command, _ []string) error {
-	path, err := cmd.Flags().GetString(cli.ConfigFlag)
+	path, err := cmd.Flags().GetString("config")
 	if err != nil {
 		return err
 	}

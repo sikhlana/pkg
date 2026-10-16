@@ -56,7 +56,6 @@ func TestRootCommandHelp(t *testing.T) {
 
 	require.Equal(t, 0, got.code)
 	assert.Contains(t, got.stdout, "Usage:")
-	assert.Contains(t, got.stdout, "--config")
 }
 
 func TestVersionFlagMatchesSubcommand(t *testing.T) {
@@ -86,35 +85,22 @@ func TestVersionCommandUnderAnyRoot(t *testing.T) {
 	assert.Equal(t, result{stdout: "other " + cli.ReadBuildInfo().String() + "\n"}, execute(t, root, "version"))
 }
 
-func TestConfigFlagReachesSubcommand(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "unset", args: []string{"serve"}, want: ""},
-		{name: "set", args: []string{"serve", "--config", "/etc/myapp.yaml"}, want: "/etc/myapp.yaml"},
-	}
+func TestRootHasNoConfigFlag(t *testing.T) {
+	var ran bool
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got string
+	root := newRoot(&cobra.Command{
+		Use: "serve",
+		RunE: func(*cobra.Command, []string) error {
+			ran = true
 
-			root := newRoot(&cobra.Command{
-				Use: "serve",
-				RunE: func(cmd *cobra.Command, _ []string) error {
-					var err error
+			return nil
+		},
+	})
 
-					got, err = cmd.Flags().GetString(cli.ConfigFlag)
+	got := execute(t, root, "serve", "--config", "/etc/myapp.yaml")
 
-					return err
-				},
-			})
-
-			require.Equal(t, result{}, execute(t, root, tt.args...))
-			assert.Equal(t, tt.want, got)
-		})
-	}
+	assert.Equal(t, result{code: 1, stderr: "Error: unknown flag: --config\n"}, got)
+	assert.False(t, ran, "the command ran")
 }
 
 func TestSubcommandOwnsEveryShorthand(t *testing.T) {

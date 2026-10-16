@@ -1,6 +1,6 @@
 module github.com/sikhlana/pkg/cli
 
-go 1.27
+go 1.26
 
 require (
 	github.com/spf13/cobra v1.10.2

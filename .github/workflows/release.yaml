@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# One publish at a time, and every waiting run keeps its place: queue: max
+# stops a newer run from cancelling one that's pending.
+concurrency:
+  group: release
+  cancel-in-progress: false
+  queue: max
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  publish:
+    name: Publish releases
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Get the release tool
+        id: tool
+        uses: ./.github/actions/release-tool
+      # publish tags the checked-out commit, the pushed one.
+      - name: Create missing releases
+        env:
+          RELEASE: ${{ steps.tool.outputs.release }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          "${RELEASE}" publish

@@ -1,0 +1,77 @@
+name: Release tool
+description: >-
+  Restore the release tool and the gorelease it pins from the cache, or build
+  and cache them.
+
+inputs:
+  go:
+    description: Set up Go even on a cache hit, for steps that run the go command.
+    default: "false"
+
+outputs:
+  release:
+    description: Path to the release tool.
+    value: ${{ steps.paths.outputs.release }}
+  gorelease:
+    description: Path to the gorelease binary pinned by tools/release/go.mod.
+    value: ${{ steps.paths.outputs.gorelease }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve paths
+      id: paths
+      shell: bash
+      run: |
+        dir="${RUNNER_TEMP}/release-tool"
+        {
+          echo "dir=${dir}"
+          echo "release=${dir}/release"
+          echo "gorelease=${dir}/gorelease"
+        } >> "${GITHUB_OUTPUT}"
+
+    - name: Restore from cache
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.dir }}
+        # Everything the binaries are built from: the Go version, the tool's
+        # dependencies (gorelease included), its non-test sources, and this
+        # action, whose Build step says how.
+        key: release-tool-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', '.github/actions/release-tool/action.yaml', 'tools/release/go.mod', 'tools/release/go.sum', 'tools/release/**/*.go', '!tools/release/**/*_test.go') }}
+
+    - name: Set up Go to build
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: .go-version
+        cache-dependency-path: tools/release/go.sum
+
+    - name: Build
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: tools/release
+      env:
+        GOWORK: "off"
+        RELEASE: ${{ steps.paths.outputs.release }}
+        GORELEASE: ${{ steps.paths.outputs.gorelease }}
+      run: |
+        go build -o "${RELEASE}" .
+        go build -o "${GORELEASE}" golang.org/x/exp/cmd/gorelease
+
+    # Saved straight away rather than in a post step, so a job that fails later
+    # still fills the cache.
+    - name: Save to cache
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.dir }}
+        key: ${{ steps.cache.outputs.cache-primary-key }}
+
+    # No dependency cache: the binaries are already built.
+    - name: Set up Go to run
+      if: steps.cache.outputs.cache-hit == 'true' && inputs.go == 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version-file: .go-version
+        cache: false

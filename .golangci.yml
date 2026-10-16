@@ -3,7 +3,8 @@
 
 # Based on the golden config for golangci-lint v2:
 # https://gist.github.com/maratori/47a4d00457a92aa426dbd48a18776322
-# Adapted for github.com/sikhlana/pkg: forbidigo bans and godoc enforcement from openspec/config.yaml.
+# Adapted for github.com/sikhlana/pkg: forbidigo bans, godoc enforcement and empty lines around blocks
+# (wsl_v5) from openspec/config.yaml.
 
 version: "2"
 
@@ -105,6 +106,7 @@ linters:
     - usetesting # reports uses of functions with replacement inside the testing package
     - wastedassign # finds wasted assignment statements
     - whitespace # detects leading and trailing whitespace
+    - wsl_v5 # add or remove empty lines
 
   # All settings can be found here https://github.com/golangci/golangci-lint/blob/HEAD/.golangci.reference.yml
   settings:
@@ -315,6 +317,17 @@ linters:
       # Enable/disable `context.TODO()` detections.
       # Default: false
       context-todo: true
+
+    wsl_v5:
+      # Enforces the constitution's empty-line rule. Block statements (and go,
+      # defer, send) are never cuddled with the line above, and the default err
+      # check keeps `if err != nil` directly under the call it checks.
+      # Default: 1
+      cuddle-max-statements: 0
+      # Checks to enable on top of the defaults.
+      # Default: []
+      enable:
+        - after-block
 
   exclusions:
     # Log a warning if an exclusion rule is unused.

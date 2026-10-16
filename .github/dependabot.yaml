@@ -1,0 +1,21 @@
+version: 2
+
+# Library modules are left out: a dependency bump there needs a VERSION bump,
+# which Dependabot can't make.
+updates:
+  # "/" covers .github/workflows; local composite actions are listed too.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /tools/release
+    # gorelease's module is required only by a tool directive, so go.mod
+    # marks it // indirect; the default (direct only) would never bump it.
+    allow:
+      - dependency-type: all
+    schedule:
+      interval: weekly

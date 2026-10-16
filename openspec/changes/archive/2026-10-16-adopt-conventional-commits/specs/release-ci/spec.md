@@ -34,6 +34,18 @@ CI SHALL fail a pull request whose title isn't a Conventional Commits 1.0 header
 
 ## MODIFIED Requirements
 
+### Requirement: Pull request results are reported in one place
+
+Each failure SHALL be reported against the file to fix. The check summary SHALL list every changed module with its base version, its new version and its outcome. The pull request's module jobs SHALL roll up into a single overall status that fails when any of them fails and passes when every one passes or is skipped. The title check SHALL report as a separate status, so editing the title never re-runs or skips the module jobs.
+
+#### Scenario: Mixed results
+- **WHEN** `logger` passes and `metrics` fails its version check in the same pull request
+- **THEN** the summary shows `logger` as passing and `metrics` as failing with the reason, an error is attached to `metrics/VERSION`, and the overall status fails
+
+#### Scenario: Title edited
+- **WHEN** a pull request's title is edited and no commit is pushed
+- **THEN** only the title check runs again, and the overall status for the module jobs keeps its result
+
 ### Requirement: Releases describe only their own module
 
 Each release SHALL be titled with its tag. Its notes SHALL list the subjects of commits that touched the module's directory since that module's previous release, or every commit that touched it, for a first release. Publish SHALL NOT ask GitHub to mark a release as the repository's latest. GitHub still treats the newest full release as latest when none is marked, so in practice the most recently published release of any module is shown as latest.

@@ -99,7 +99,7 @@ The tests build throwaway git repositories, and the gorelease tests make the go 
 
 ## CI layout
 
-- **Two required checks.** Branch protection requires CI OK, a job that needs every other job and fails only on a failure or cancellation. Skipped matrices count as passing, so a PR touching no module still merges. It also requires PR title, from its own workflow. That workflow also runs on title edits, and running all of CI on every edit would be wasteful. Skipping CI's jobs on edits would be worse: CI OK would pass for a head commit whose lint had failed.
+- **Two required checks.** The default branch's ruleset requires CI OK, a job that needs every other job and fails only on a failure or cancellation. Skipped matrices count as passing, so a PR touching no module still merges. It also requires PR title, from its own workflow. That workflow also runs on title edits, and running all of CI on every edit would be wasteful. Skipping CI's jobs on edits would be worse: CI OK would pass for a head commit whose lint had failed.
 - **Cached binaries.** Jobs restore the tool and gorelease from a cache keyed on everything they're built from, the composite action included, instead of compiling in every job.
 - **One publish at a time.** Publishes run one after another, and `concurrency.queue: max` keeps every waiting run. With the default, a third quick merge would replace the second's pending publish.
 - **Timeouts.** Every job has a timeout, and so does each gorelease run, so a stalled download can't hold the required check for hours.

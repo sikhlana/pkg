@@ -4,20 +4,13 @@ Turns cobra commands into running fx apps: a root command with the logging flags
 
 ## Configuration
 
-None. `Options` holds the program's developer settings, fixed in code: the default log format, the text handler, the start and stop timeouts and the modules every command shares. The flags are the operator's per-run choices:
-
-| Flag | Description |
-|------|-------------|
-| --debug | Logs from Debug up, fx's own events included. Can't be combined with --quiet. |
-| --quiet, -q | Logs from Warn up. Can't be combined with --debug. |
-| --format | json or text. Defaults to Options.Format; any other value fails before an app is built. |
-| --config | The config file, from cli's root, handed to config/configloader. |
+None. `Options` holds the program's developer settings, fixed in code: the default log format, the text handler, the start and stop timeouts and the modules every command shares. The root command's flags are the operator's per-run choices; see Flags under Usage.
 
 ## Exported Members
 
 | Name | Description |
 |------|-------------|
-| New | Returns an App with the program's Options. |
+| New | Returns an App with the program's Options. Panics, with an error matching log.ErrUnknownFormat, when Options.Format is neither json nor text. |
 | Options | The program's developer settings, shared by every command. |
 | Options.Format | The default of --format: log.FormatJSON for a service, log.FormatText for an operator tool. |
 | Options.TextHandler | Renders text records. Nil means tint.New. |
@@ -47,6 +40,8 @@ Build one `App` for the program, its root with `RootCommand`, and its commands w
 package main
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 	"go.uber.org/fx"
 
@@ -89,13 +84,26 @@ func root() *cobra.Command {
 }
 ```
 
-Each command's app gets, in order:
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| --debug | Logs from Debug up, fx's own events included. Can't be combined with --quiet. |
+| --quiet, -q | Logs from Warn up. Can't be combined with --debug. |
+| --format | json or text. Defaults to Options.Format; any other value fails before an app is built. |
+| --config | The config file, from cli's root, handed to config/configloader. |
+
+#### What each app gets
+
+In order:
 
 - fx's events through `log.NewEventLogger`, at Debug, with its failures at Error;
+- a module of its own whose invoke makes the app's logger slog's default, so third-party `slog` and standard `log` output share its format. fx runs a module's invokes before its parent's, in the order modules are listed, so this one runs before any other module's invokes;
 - `log.Module`, with the level and format from the flags, and `Options.TextHandler` or tint for text;
 - the `--config` value through `configloader.WithFilename`. The kernel owns it, so an app that supplies its own fails to build. In an app that doesn't load config, nothing reads it;
-- an invoke that makes the app's logger slog's default, so third-party `slog` and standard `log` output share its format. When the command returns, for any reason, slog's default and the `log` package's output and flags are put back;
 - `Options.Shared`, then the command's own options.
+
+While the app runs, the `log` package writes into its logger at Warn. The `log` package has no levels, and what libraries write through it is mostly error reports, net/http's ErrorLog for one, so they survive `--quiet`. When the command returns, for any reason, slog's default, the `log` package's output and flags, and that level are put back.
 
 A command checks its config by registering a runner that returns once the config has loaded, as `check` does above: an app needs a runner to run.
 
@@ -105,7 +113,8 @@ A command checks its config by registering a runner that returns once the config
 |-------|------------|-------------|------------------|
 | flags | a parse error, an unknown --format, --debug with --quiet | cobra | yes |
 | the kernel's wiring | ErrMissingFlag | cobra | yes |
-| startup | the root cause | fx's event logger, with the full chain, at Error | no |
+| building and starting | the root cause | fx's event logger, with the full chain, at Error | no |
+| runner checks | ErrNoRunners, ErrDuplicateRunner or ErrInvalidRunner, from kernelrun | the kernel, at Error | no |
 | run and stop | the crash and stop errors | kernelrun, at Error, per runner | no |
 
 Once an app has been built, `Run` sets the command's `SilenceErrors` on any failure, so a JSON service never ends its log stream with a plain-text line and nothing is reported twice. The error is still returned, so `cli.Execute` exits with its code: a runner returning `cli.Exit(3, err)` exits 3, and any other failure exits 1. If the logger itself can't be built, fx falls back to its console logger, which still prints the failure.

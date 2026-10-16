@@ -1,6 +1,7 @@
 package kernel_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -52,6 +54,30 @@ func TestUnknownFormat(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.Contains(t, stderr, "unknown log format")
 	assert.False(t, ran, "the app ran")
+}
+
+func TestFormatHelpShowsAPlaceholder(t *testing.T) {
+	root, _ := program(kernel.Options{})
+
+	var help bytes.Buffer
+
+	root.SetOut(&help)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"run", "--help"})
+
+	require.Equal(t, 0, cli.Execute(t.Context(), root))
+	assert.Contains(t, help.String(), "--format format")
+}
+
+func TestNewPanicsOnAnUnknownFormat(t *testing.T) {
+	defer func() {
+		err, ok := recover().(error)
+		require.True(t, ok, "New panicked with an error")
+		require.ErrorIs(t, err, log.ErrUnknownFormat)
+		assert.EqualError(t, err, "kernel: Options.Format: unknown log format: Format(5)")
+	}()
+
+	kernel.New(kernel.Options{Format: log.Format(5)})
 }
 
 func TestProgramDefaultFormatWithTint(t *testing.T) {
@@ -209,6 +235,20 @@ func TestDefaultLoggerDuringTheRun(t *testing.T) {
 	assert.Contains(t, out.messages(t, "INFO"), "through the default")
 }
 
+func TestDefaultLoggerAheadOfOtherModules(t *testing.T) {
+	early := fx.Module("early", fx.Invoke(func() {
+		//nolint:sloglint // The test checks that a module's invoke already writes through the app's logger.
+		slog.Info("from a module's invoke")
+	}))
+
+	root, out := program(kernel.Options{Shared: early}, kernelrun.WithRunner("app", returnNil))
+
+	code, _ := execute(t, root, "run")
+
+	require.Equal(t, 0, code)
+	assert.Contains(t, out.messages(t, "INFO"), "from a module's invoke")
+}
+
 func TestDefaultLoggerRestored(t *testing.T) {
 	tests := []struct {
 		name string
@@ -222,6 +262,7 @@ func TestDefaultLoggerRestored(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger, writer, flags := saveDefault(t)
+			level := bridgeLevel()
 
 			root, _ := program(kernel.Options{}, tt.opts...)
 
@@ -230,6 +271,7 @@ func TestDefaultLoggerRestored(t *testing.T) {
 			require.Equal(t, tt.code, code)
 			assert.Same(t, logger, slog.Default())
 			assertLogOutput(t, writer, flags)
+			assert.Equal(t, level, bridgeLevel(), "the log package's level wasn't restored")
 		})
 	}
 }
@@ -268,6 +310,55 @@ func TestStartupFailurePrintsNothing(t *testing.T) {
 	assert.NotEmpty(t, out.messages(t, "ERROR"))
 }
 
+func TestRunnerCheckFailureIsLogged(t *testing.T) {
+	root, out := program(kernel.Options{})
+
+	code, stderr := execute(t, root, "run")
+
+	assert.Equal(t, 1, code)
+	assert.Empty(t, stderr)
+
+	var failure map[string]any
+
+	for _, rec := range out.records(t) {
+		if rec["msg"] == "checking runners failed" {
+			failure = rec
+		}
+	}
+
+	require.NotNil(t, failure, "no record of the check failure in %s", out)
+	assert.Equal(t, "ERROR", failure["level"])
+	assert.Equal(t, "checking runners: no runners", failure["error"])
+}
+
+func TestStartTimeoutReachesKernelrun(t *testing.T) {
+	root, out := program(kernel.Options{StartTimeout: 50 * time.Millisecond},
+		kernelrun.WithRunner("app", returnNil),
+		lifecycle(fx.Hook{OnStart: waitDone}),
+	)
+
+	begin := time.Now()
+	code, _ := execute(t, root, "run")
+
+	assert.Equal(t, 1, code)
+	assert.Less(t, time.Since(begin), 5*time.Second, "the start timeout didn't apply")
+	assert.Contains(t, out.String(), "context deadline exceeded")
+}
+
+func TestStopTimeoutReachesKernelrun(t *testing.T) {
+	root, out := program(kernel.Options{StopTimeout: 50 * time.Millisecond},
+		kernelrun.WithRunner("app", returnNil),
+		lifecycle(fx.Hook{OnStop: waitDone}),
+	)
+
+	begin := time.Now()
+	code, _ := execute(t, root, "run")
+
+	assert.Equal(t, 1, code)
+	assert.Less(t, time.Since(begin), 5*time.Second, "the stop timeout didn't apply")
+	assert.Contains(t, out.messages(t, "ERROR"), "stopping the app failed")
+}
+
 func TestUnknownFlagPrinted(t *testing.T) {
 	var ran bool
 
@@ -293,4 +384,18 @@ func failingConstructor() fx.Option {
 // returnNil is a runner that returns at once.
 func returnNil(context.Context) error {
 	return nil
+}
+
+// waitDone is a hook that waits for its context and returns its error.
+func waitDone(ctx context.Context) error {
+	<-ctx.Done()
+
+	return ctx.Err()
+}
+
+// lifecycle registers hook on the app's lifecycle.
+func lifecycle(hook fx.Hook) fx.Option {
+	return fx.Invoke(func(lc fx.Lifecycle) {
+		lc.Append(hook)
+	})
 }

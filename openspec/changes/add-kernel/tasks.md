@@ -115,3 +115,16 @@ Sections 7 to 10 are the second pull request, and wait for `kernelrun/v0.1.0` to
 
 - [x] 10.1 In `kernel/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
 - [x] 10.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 10.1 and 10.2.
+
+## 11. kernel code review fixes
+
+The review of e1d5204 found seven issues, two reproduced. All are fixed below; design decisions 6, 7 and 9 and the kernel spec record the outcome.
+
+- [x] 11.1 `Run` populates the app's logger and logs a failure of `kernelrun`'s runner checks (`ErrNoRunners`, `ErrDuplicateRunner`, `ErrInvalidRunner`) at Error before silencing cobra; nobody else reports them. Test: a command with no runners prints nothing, logs the failure at Error and exits 1.
+- [x] 11.2 The invoke making the app's logger slog's default sits in a module of its own listed first, since fx runs every module's invokes before the root's. Test: a shared module's invoke logging through slog's default writes in the app's format.
+- [x] 11.3 While the app runs, the log package writes into the app's logger at Warn (`slog.SetLogLoggerLevel`), so `--quiet` keeps what libraries report through it; the level is restored with the default. Tests: a `log.Print` under `-q` reaches the log at Warn, and the level is back after a clean run and a startup failure.
+- [x] 11.4 `--format`'s usage backquotes a placeholder, so help reads `--format format`. Test: the help output.
+- [x] 11.5 `New` panics, with an error matching `log.ErrUnknownFormat`, on an `Options.Format` that's neither json nor text. Test: `log.Format(5)`.
+- [x] 11.6 Tests that `Options.StartTimeout` and `Options.StopTimeout` reach `kernelrun`: a blocking OnStart hook fails the start, and a blocking OnStop hook fails the stop, each well inside the default.
+- [x] 11.7 README: Configuration says none, with the flags table moved under Usage; the example imports `context`; the failure table gains the runner checks; the default logger's module and the log package's level are documented.
+- [x] 11.8 Repeat 10.1 and 10.2: lint reports 0 issues, `go test ./...` and `go test -race ./...` pass in `kernel/`, `GOWORK=off` builds and tidies clean, and the `-short` sweep passes across all six modules.

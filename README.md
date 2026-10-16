@@ -4,10 +4,11 @@ Reusable Go modules I reach for day to day, built around [Uber fx](https://uber-
 
 ## Modules
 
-Nothing has shipped yet. Each module gets a row here, in alphabetical order, as it lands. Import paths follow `github.com/sikhlana/pkg/<dir>`.
+Each module gets a row here, in alphabetical order, as it lands. Import paths follow `github.com/sikhlana/pkg/<dir>`.
 
 | Module | Description |
 |--------|-------------|
+| [cli](./cli) | Cobra scaffolding for a program's main: signal handling, exit codes, root and version commands, build info |
 
 ## Installation
 

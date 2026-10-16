@@ -6,7 +6,7 @@ Checks a configuration struct the same way wherever it's checked, after loading 
 
 ### Requirement: Tag rules apply to every reachable field except skipped ones
 
-Validation SHALL evaluate the `validate` tag rules on every exported field of the config and of every struct reachable from it through struct fields, embedded structs and non-nil pointers. A field tagged `validate:"-"` SHALL be neither evaluated nor descended into, so no rule beneath it, `required` included, can fail through that field.
+Validation SHALL evaluate the `validate` tag rules on every exported field of the config and of every struct reachable from it through struct fields, embedded structs, non-nil pointers and non-nil interface values. A field tagged `validate:"-"` SHALL be neither evaluated nor descended into, so no rule beneath it, `required` included, can fail through that field.
 
 #### Scenario: Nested rule fails
 - **WHEN** the config's `http.port` field has the rule `min=1024` and holds 80
@@ -26,7 +26,7 @@ Validation SHALL evaluate the `validate` tag rules on every exported field of th
 
 ### Requirement: A Validate method owns its branch
 
-When a value reachable from the config has a Validate method, with a value or a pointer receiver, validation SHALL call it once and SHALL NOT look for Validate methods anywhere beneath it; the method decides which of its children to check. Beneath values without one, validation SHALL keep looking through exported struct fields, embedded structs, non-nil pointers, slice and array elements, and map values, but never through a field tagged `validate:"-"`. A value whose type decodes itself from text SHALL be treated as a single value: its own Validate method is called, and nothing inside it is searched.
+When a value reachable from the config has a Validate method, with a value or a pointer receiver, validation SHALL call it once and SHALL NOT look for Validate methods anywhere beneath it; the method decides which of its children to check. Beneath values without one, validation SHALL keep looking through exported struct fields, embedded structs, non-nil pointers, slice and array elements, map values and non-nil interface values, but never through a field tagged `validate:"-"`. A value whose type decodes itself from text SHALL be treated as a single value: its own Validate method is called, and nothing inside it is searched.
 
 #### Scenario: The outermost method wins
 - **WHEN** a parent config and its child both have Validate methods and the parent's doesn't delegate to the child
@@ -98,11 +98,15 @@ Each violation SHALL carry the dotted key an operator would write for the failin
 
 ### Requirement: Delegated violations keep their full key
 
-When a Validate method validates one of its children and returns the result, each violation SHALL be reported under the parent's key joined with the child's key, with no context repeated. The same SHALL hold when a Validate method returns keyed errors it built itself, and when it returns several violations joined together.
+When a Validate method validates one of its fields with ValidateField, given its receiver and that field, and returns the result, each violation SHALL be reported under the method's key, the field's key and the violation's own key joined, with no context repeated. This SHALL hold for value and pointer receivers alike, and for a field tagged `validate:"-"`. The same SHALL hold when a Validate method returns keyed errors it built itself, and when it returns several violations joined together. ValidateField SHALL panic when the field isn't beneath the receiver, since that's a bug in the method rather than in the config.
 
 #### Scenario: Mode dispatch
-- **WHEN** the `messaging` section's Validate method validates its AMQP child, whose `url` fails
+- **WHEN** the `messaging` section's Validate method validates its `amqp` field with ValidateField, and the AMQP config's `url` fails
 - **THEN** the violation's key is `messaging.amqp.url` and its text names that key once
+
+#### Scenario: Pointer receiver
+- **WHEN** the same Validate method has a pointer receiver
+- **THEN** the violation's key is still `messaging.amqp.url`
 
 #### Scenario: Method-built keyed error
 - **WHEN** the `http.ssl` section's Validate method returns a keyed error for `cert_path`
@@ -111,6 +115,10 @@ When a Validate method validates one of its children and returns the result, eac
 #### Scenario: Several delegated violations
 - **WHEN** a delegated child reports violations for `url` and `queue`
 - **THEN** both are reported, each under the parent's key
+
+#### Scenario: Field outside its parent
+- **WHEN** a Validate method passes ValidateField a field of a different struct
+- **THEN** ValidateField panics
 
 ### Requirement: Tag violations never contain the value
 

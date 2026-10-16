@@ -4,31 +4,31 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
 
 ## 1. Validator module scaffold
 
-- [ ] 1.1 Branch `add-configvalidator` off `origin/main` after `git fetch`.
-- [ ] 1.2 Create `config/configvalidator/`:
+- [x] 1.1 Branch `add-configvalidator` off `origin/main` after `git fetch`.
+- [x] 1.2 Create `config/configvalidator/`:
   - `go.mod` for `github.com/sikhlana/pkg/config/configvalidator`, with the go directive from `.go-version`;
   - package `configvalidator`, with tests in `configvalidator_test` (design decision 2);
   - `VERSION` containing `0.1.0`;
   - require the latest go-playground/validator/v10 and stretchr/testify.
   - Done when `go build ./...` passes from `config/configvalidator/`.
-- [ ] 1.3 Register `./config/configvalidator` in the root `go.work`.
+- [x] 1.3 Register `./config/configvalidator` in the root `go.work`.
 
 ## 2. Key rules
 
-- [ ] 2.1 The two exported key-rule helpers from design decision 1:
+- [x] 2.1 The two exported key-rule helpers from design decision 1:
   - a struct field to its key segment: mapstructure name, Go name when untagged, no segment when squashed, excluded when tagged `-` or unexported;
   - whether a type decodes itself from text, directly or through a pointer.
-- [ ] 2.2 Tests:
+- [x] 2.2 Tests:
   - tagged, untagged, squashed with and without a name, `-`, unexported, and tag options such as `,omitempty` ignored;
   - text decoding for `time.Time`, `netip.Prefix`, `slog.Level`, `net.IP`, a type with a pointer-receiver `UnmarshalText`, a plain struct and a plain string.
 
 ## 3. Errors
 
-- [ ] 3.1 `Error` (`Key`, `Err`) and `RuleError` (tag and parameter) with pointer receivers, and `ErrNilConfig`, as in design decisions 2 and 4:
+- [x] 3.1 `Error` (`Key`, `Err`) and `RuleError` (tag and parameter) with pointer receivers, and `ErrNilConfig`, as in design decisions 2 and 4:
   - `Error` renders `key: cause`, or the cause alone when the key is empty, and unwraps to `Err`;
   - `RuleError` renders `fails tag=param`, or `fails tag`.
-- [ ] 3.2 The unexported composition from design decision 4: a key is prefixed onto a top-level `*Error`, onto each part of a joined error, and anything else becomes an opaque `*Error` at that key. The input is never mutated.
-- [ ] 3.3 Tests:
+- [x] 3.2 The unexported composition from design decision 4: a key is prefixed onto a top-level `*Error`, onto each part of a joined error, and anything else becomes an opaque `*Error` at that key. The input is never mutated.
+- [x] 3.3 Tests:
   - rendering with and without a key;
   - composition of a single error, a joined error, a nested join, and an opaque `fmt.Errorf("…: %w", …)` wrapper;
   - the input is unchanged after composition;
@@ -36,8 +36,8 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
 
 ## 4. Tag pass
 
-- [ ] 4.1 The package-level validator, built with required-struct validation on. Each failure's Go-name namespace is translated into a key with the section 2 rules: the root segment is dropped, and `[i]` and `[key]` are kept. Each failure becomes an `*Error` whose cause is a `*RuleError`. See design decision 2.
-- [ ] 4.2 Tests for the spec requirements "Tag rules apply to every reachable field except skipped ones", "Violations name the config key" and "Tag violations never contain the value":
+- [x] 4.1 The package-level validator, built with required-struct validation on. Each failure's Go-name namespace is translated into a key with the section 2 rules: the root segment is dropped, and `[i]` and `[key]` are kept. Each failure becomes an `*Error` whose cause is a `*RuleError`. See design decision 2.
+- [x] 4.2 Tests for the spec requirements "Tag rules apply to every reachable field except skipped ones", "Violations name the config key" and "Tag violations never contain the value":
   - a nested failure's key;
   - a dormant struct behind `validate:"-"` with an empty `required` field passes, and the same struct validated on its own fails;
   - a nil pointer section is skipped;
@@ -47,14 +47,15 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
 
 ## 5. Validator walk
 
-- [ ] 5.1 `Validator` and `Validate[T any](cfg *T) error`, as in design decision 3:
+- [x] 5.1 `Validator` and `Validate[T any](cfg *T) error`, as in design decision 3:
   - a nil config returns `ErrNilConfig`;
   - the tag pass runs, then the walk;
   - the walk stops at nil pointers, `validate:"-"` fields and text-decoded values;
   - it calls the outermost Validator, through the value or its address, unless a tag violation sits at or below its key;
-  - it descends into struct fields, slice and array elements (`[i]`) and map values (`.entry`). Map values are copied so pointer receivers are found;
+  - it descends into struct fields, slice and array elements (`[i]`), map values (`.entry`) and interface values. Map values and interface contents are copied so pointer receivers are found;
   - the result is nil, one `*Error`, or a join.
-- [ ] 5.2 Tests for the spec requirements "A Validate method owns its branch", "A Validate method doesn't run on a branch whose tag rules failed", "Every violation is reported", "Delegated violations keep their full key" and "A nil config is an error":
+  - `ValidateField[P, F any](parent *P, field *F) error`: finds field beneath parent by address, ignoring validate tags, and returns `Validate(field)` with each violation under field's key. A nil field returns `ErrNilConfig`; a field not beneath parent panics.
+- [x] 5.2 Tests for the spec requirements "A Validate method owns its branch", "A Validate method doesn't run on a branch whose tag rules failed", "Every violation is reported", "Delegated violations keep their full key" and "A nil config is an error":
   - the outermost method wins, and the walk finds methods below a plain parent;
   - a pointer receiver on the root, on slice elements and on map values;
   - a skipped field hides its Validate method;
@@ -62,37 +63,39 @@ The change ships as two pull requests (design.md, Migration Plan). Sections 1 to
   - a shape failure suppresses the semantic check, while another branch's failure is still reported;
   - violations in two sections are both reported, a sentinel stays matchable, and a valid config returns nil;
   - a root failure renders the reason alone;
-  - mode dispatch reports `messaging.amqp.url` with the key named once, a method-built keyed error becomes `http.ssl.cert_path`, and several delegated violations each get the parent's key;
+  - mode dispatch through `ValidateField` reports `messaging.amqp.url` with the key named once, with value and pointer receivers; a method-built keyed error becomes `http.ssl.cert_path`; and several delegated violations each get the parent's key;
+  - `ValidateField` keys beneath a skipped field, behind a pointer, in a slice element and in a squashed field; a field outside its parent, the parent itself and a nil parent panic; a nil field returns `ErrNilConfig`;
+  - interface values are walked, and a nil interface or a nil pointer inside one is skipped;
   - a promoted Validate method from an embedded type stops the walk, pinning the behaviour from the design's Risks;
   - a nil config.
 
 ## 6. Constitution and docs (first pull request)
 
-- [ ] 6.1 In `openspec/config.yaml`, make design decision 14's four edits:
-  - replace the `required` ban with the dispatch convention: tags check shape and presence, mode-specific fields are marked `validate:"-"`, and the parent's Validate delegates with `configvalidator.Validate`, returning the result directly or joined;
+- [x] 6.1 In `openspec/config.yaml`, make design decision 14's four edits:
+  - replace the `required` ban with the dispatch convention: tags check shape and presence, mode-specific fields are marked `validate:"-"`, and the parent's Validate delegates with `configvalidator.ValidateField`, returning the result directly or joined;
   - a Config never has both `x` and `x_file`, and a module's own path fields are named `*_path`;
   - `config/configloader`'s generic provider is the exception to the `Module` variable rule.
   - the nested module layout: `<group>/<group><name>` with the package named after the directory, and the package name used for fx.Module names, the `<module>` segment of name and group tags, spec folders and commit scopes. The versioning example becomes `http/httpserver/v0.2.0`.
-- [ ] 6.2 Write `config/configvalidator/README.md` in the constitution's order:
+- [x] 6.2 Write `config/configvalidator/README.md` in the constitution's order:
   - overview;
   - Configuration: none, and why;
-  - Exported Members: every export, including `Error.Key`, `Error.Err`, the `RuleError` fields, the methods, `ErrNilConfig` and both key-rule helpers;
-  - Usage, Standalone: validating a hand-built Config; a mode-dispatching Validate method with `validate:"-"`; returning delegated results directly; `dive` for element rules; the embedding caveat;
+  - Exported Members: every export, including `Error.Key`, `Error.Err`, the `RuleError` fields, the methods, `ErrNilConfig`, `ValidateField` and both key-rule helpers;
+  - Usage, Standalone: validating a hand-built Config; a mode-dispatching Validate method with `validate:"-"` that delegates with `ValidateField`; `dive` for element rules; the embedding caveat;
   - Usage, With fx: a Provider closure validating the Config it's handed (the module itself doesn't import fx).
   - No backticks in table cells.
-- [ ] 6.3 In the root `README.md`, add the `config/configvalidator` row to the Modules table, in alphabetical order, and change the tag example `http/server/v0.2.0` to `http/httpserver/v0.2.0`.
+- [x] 6.3 In the root `README.md`, add the `config/configvalidator` row to the Modules table, in alphabetical order, and change the tag example `http/server/v0.2.0` to `http/httpserver/v0.2.0`.
 
 ## 7. Verification (first pull request)
 
-- [ ] 7.1 In `config/configvalidator/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
-- [ ] 7.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.1 and 7.2.
-- [ ] 7.3 Review the branch's diff for correctness. Fix findings in new commits, record them in design.md, and repeat 7.1 and 7.2.
+- [x] 7.1 In `config/configvalidator/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...`.
+- [x] 7.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.1 and 7.2.
+- [x] 7.3 Review the branch's diff for correctness. Fix findings in new commits, record them in design.md, and repeat 7.1 and 7.2.
 
 ## 8. Release `config/configvalidator`
 
 The `config/configvalidator/v0.1.0` release is immutable and intended. A broken release is fixed forward (design.md, Migration Plan).
 
-- [ ] 8.1 Commit by pathspec, after checking `git diff --cached --name-status`. Then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"): `plan` prints `["config/configvalidator"]`, and `check` passes for a new module at 0.1.0.
+- [x] 8.1 Commit by pathspec, after checking `git diff --cached --name-status`. Then run `plan` and `check` locally against `origin/main` (tools/release README, "Running check locally"): `plan` prints `["config/configvalidator"]`, and `check` passes for a new module at 0.1.0.
 - [ ] 8.2 Draft the PR title (`feat(configvalidator): add config validator`) and body in the conversation. After approval, push and open it. Check `git diff --stat origin/main...HEAD` lists only `config/configvalidator/`, `go.work`, `README.md`, `openspec/config.yaml` and this change. In CI, `plan` selects `config/configvalidator`, lint, test, release check and the PR title check pass, and CI OK is green. Record the run.
 - [ ] 8.3 After the squash merge, publish creates `config/configvalidator/v0.1.0` with a GitHub release. Record the run.
 - [ ] 8.4 Consumer check in a fresh temp module with `GOWORK=off` and no `replace`, printing one line per check and confirming three lines:

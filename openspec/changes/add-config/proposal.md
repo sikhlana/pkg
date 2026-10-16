@@ -7,7 +7,7 @@
 - New module `config/configvalidator` (`github.com/sikhlana/pkg/config/configvalidator`), starting at 0.1.0. It checks a Config the way every module and the loader share:
   - **A tag pass, then a Validator walk.** go-playground `validate` tags run first; then `Validate()` is called on the outermost Validator in each branch, which owns its subtree.
   - **Every violation is reported,** not just the first.
-  - **Errors carry the config key.** An error type pairs the dotted mapstructure key with the cause and renders as `key: reason`. Keys compose when a parent's `Validate` delegates to a child, so a delegated failure still names its full key.
+  - **Errors carry the config key.** An error type pairs the dotted mapstructure key with the cause and renders as `key: reason`. Keys compose when a parent's `Validate` delegates to a child through a helper that takes both, so a delegated failure still names its full key.
   - **Tag failures name the rule and its parameter,** never the value, since config values include secrets.
   - **The walk treats types that implement `encoding.TextUnmarshaler` as single values,** the same rule the loader uses for env names.
 - New module `config/configloader` (`github.com/sikhlana/pkg/config/configloader`), starting at 0.1.0 after `config/configvalidator` is published. It reads configuration into a struct with viper:

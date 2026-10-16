@@ -10,6 +10,7 @@ Facts that shape the approach, checked against the libraries' sources:
 - **Viper's struct binding** (`decodeStructKeys`) sits behind an internal feature flag, so a reflection walk is still needed.
 - **go-playground's `validate:"-"` drops a field from the type cache,** so nothing behind it is visited. `StructNamespace()` reports Go field names whatever tag-name function is registered. Struct values inside slices and maps are checked only when the field carries `dive`.
 - **mapstructure v2.4.0 and later keep input values out of its error messages** (the fixes for GHSA-fv92-fjc5-jj9h and GHSA-2464-8j7c-4cjm). Its `DecodeError` names the dotted field path. `TextUnmarshallerHookFunc` returns `UnmarshalText` errors unchanged, and those often echo the input: `netip.ParsePrefix("…")`, `slog: level string "…"`. `StringToWeakSliceHookFunc` exists; viper's own copy is unexported.
+- **mapstructure doesn't skip a field tagged `mapstructure:"-"` when decoding** (checked against v2.5.0): it reads `-` as the field's key. The key rules still treat such a field as having no key. No file sensibly has a `-` key, and the loader's unknown-key check rejects one.
 - **Constitution constraints:** `WithX` names are reserved for `fx.Supply` wrappers, Params structs embed `fx.In`, documented failure modes are exported sentinels, and modules don't log through package-level slog.
 
 ## Goals / Non-Goals
@@ -53,7 +54,7 @@ The import paths repeat their group (`config/configloader`), which is the price 
 - **`config/loader` with an import alias in docs.** Consumers who skip the docs get `loader`.
 - **Flat `configloader/` directories.** Idiomatic, but loses the grouping.
 
-One package-level go-playground `Validate` instance, built with `WithRequiredStructEnabled`. It caches per type and is safe for concurrent use. No tag-name function is registered. Each `FieldError`'s `StructNamespace()` (Go names, with `[i]` and `[key]` for dived elements) is translated into a key by walking the root type along those names with decision 1's rules. The root type's own segment is dropped.
+One package-level go-playground `Validate` instance, built with `WithRequiredStructEnabled`. It caches per type and is safe for concurrent use. No tag-name function is registered. Each `FieldError`'s `StructNamespace()` (Go names, with `[i]` and `[key]` for dived elements) is translated into a key by following those names through the root value with decision 1's rules. Following the value rather than the type sees through interface fields, which go-playground descends into, and matches a map entry's name against the map's real keys, so a name containing `]` or `.` is still found. The root type's own segment is dropped: it's the type's name, which for a generic type contains dots, and it's absent for an anonymous struct.
 
 This fixes the original's documented caveat: a tag failure inside a squashed embed used to report the embedded type's name as a segment. An anonymous embed without `,squash` keeps a segment, because mapstructure decodes it under its type name.
 
@@ -70,9 +71,9 @@ The walk starts from the `*T` it's given, so the root is addressable. At each va
 2. A field tagged `validate:"-"` is never entered (decision 1's tag lookup, applied to the `validate` tag).
 3. A text-decoded value is a single value: if it's a Validator it's called, and either way the walk stops there.
 4. A Validator, through either the value or its address, is called, unless a tag violation's key equals its key or extends it past `.` or `[`. Either way the walk stops there.
-5. Otherwise the walk descends into exported struct fields, slice and array elements (`key[i]`), and map values (`key.<entry>`).
+5. Otherwise the walk descends into exported struct fields, slice and array elements (`key[i]`), map values (`key.<entry>`) and non-nil interface values (at the same key), as go-playground's tag pass does.
 
-Map values aren't addressable, so each is copied into a new addressable value before the Validator check, which lets pointer-receiver methods be found.
+Map values and interface contents aren't addressable, so each is copied into a new addressable value before the Validator check, which lets pointer-receiver methods be found.
 
 Skipping a Validator whose branch failed its tags (rule 4) keeps "report everything" from calling methods on data their own tags rejected, such as an unknown mode. It over-suppresses slightly around squashed embeds: a squashed struct shares its parent's key, so a sibling's tag failure under that key also suppresses it. Accepted, since squashed embeds rarely carry their own Validate.
 
@@ -89,9 +90,22 @@ When the walk wraps what a Validator returned, at key K:
 - a joined error is unwrapped through `Unwrap() []error`, and each part is wrapped the same way;
 - anything else becomes `*Error{Key: K, Err: err}`.
 
-A keyed error buried under `fmt.Errorf("context: %w", …)` is opaque: the context text survives, and the key stops at K. The original composed through any wrapping with `errors.As`, which silently dropped the wrapper's text. The rule for Validator authors, in godoc and docs: return `configvalidator.Validate(&c.Child)` directly, or join several results.
+A keyed error buried under `fmt.Errorf("context: %w", …)` is opaque: the context text survives, and the key stops at K. The original composed through any wrapping with `errors.As`, which silently dropped the wrapper's text.
+
+**Delegating to a field.** K is the Validator's own key, so composition alone can't name the field it delegates to: `Validate(&m.AMQP)` returns `url`, and the walk makes `messaging.url`. The original had the same gap. A second export closes it:
+
+```go
+func ValidateField[P, F any](parent *P, field *F) error
+```
+
+It finds `field` beneath `parent` by address, through struct fields, non-nil pointers and slice and array elements, ignoring validate tags, and builds its key with decision 1's rules. It returns `Validate(field)` with each violation prefixed by that key, so `ValidateField(m, &m.AMQP)` returns `amqp.url` and the walk makes `messaging.amqp.url`. Both pointers come from the same receiver, so it works with value receivers too: `&m` and `&m.AMQP` both point into the copy. A nil field returns `ErrNilConfig`. A field that isn't beneath the parent, the parent itself included, panics: it's a bug in the method, not a config problem, and the first test of that mode finds it.
+
+The rule for Validator authors, in godoc and docs: return `configvalidator.ValidateField(c, &c.Field)`, or join several results.
 
 Alternatives:
+- **Pointer identity behind an unchanged `Validate(&c.Child)`.** `Validate` would tag its errors with the child's address and the walk would look it up beneath the Validator. It only works for pointer receivers; with a value receiver the address points into a copy, and the segment is silently dropped.
+- **The author names the key,** as in `&Error{Key: "amqp", Err: Validate(&m.AMQP)}`. It needs no new export, but repeats the mapstructure tag as a string that can drift from it.
+- **Delegated keys stop at the Validator,** as in the original. Operators get `messaging.url`, a key they can't write.
 - **A custom multi-error type with a one-line rendering.** Join is standard and works with `errors.Is` and `errors.AsType` out of the box. The cost is multi-line output, which cobra prints fine.
 - **Keeping the original's built-in "validating configuration" prefix.** Callers wrap with their own context per the constitution: the loader with `validating config: %w`, a module's provider with its own gerund.
 
@@ -221,7 +235,7 @@ func WithFilename(path string) fx.Option     // fx.Supply(AsFilename(path))
 
 ### 14. Constitution edits (first PR)
 
-- **Config vs developer-time wiring:** the line "Never use the required tag…" is replaced. Tags check shape and presence, `required` included. A mode-dispatching Config marks each mode-specific field `validate:"-"`, and its `Validate` delegates to the active one with `configvalidator.Validate`, returning the result directly or joined. Cross-field invariants stay in `Validate() error`, returning exported sentinels.
+- **Config vs developer-time wiring:** the line "Never use the required tag…" is replaced. Tags check shape and presence, `required` included. A mode-dispatching Config marks each mode-specific field `validate:"-"`, and its `Validate` delegates to the active one with `configvalidator.ValidateField`, returning the result directly or joined. Cross-field invariants stay in `Validate() error`, returning exported sentinels.
 - **Config fields:** a Config never has both `x` and `x_file`, and a module's own path fields are named `*_path`.
 - **fx integration:** `config/configloader`'s generic provider is the one exception to the `Module` variable rule.
 - **Nested module layout.** A nested module lives at `<group>/<group><name>`, and its package name equals its directory name: `config/configloader`, and later `http/httpserver`. Outside the filesystem path and the tag, which the go command needs, the package name is the module's identity:
@@ -260,6 +274,7 @@ func WithFilename(path string) fx.Option     // fx.Supply(AsFilename(path))
 - **[A type that embeds something with a Validate method gets it promoted and becomes a Validator itself, so the walk stops there and skips its other fields.]** → A test pins the behaviour, and the README and docs warn about embedding validated types. The alternative, ignoring promoted methods, would break legitimate embedding.
 - **[Tag rules on struct elements inside slices and maps run only with `dive`.]** → The README says so, with an example. The walk still calls element Validators.
 - **[Keys compose only through direct returns and joins.]** → Godoc and docs give the rule, and a test shows the opaque case.
+- **[`ValidateField` panics when its field isn't beneath its parent.]** → It's a programming error in one mode's branch, found by the first test that exercises that mode.
 - **[A Validate method is skipped while tags fail in its branch, so semantic errors can surface one run later.]** → Accepted. Tags catch the shape errors that would make the method's report misleading.
 - **[The search may pick up any supported extension, `config.env` or `config.ini` included.]** → Accepted with search. Strict unknown keys turn most wrong-file pickups into errors.
 - **[Viper lowercases map keys.]** → Documented, and pinned by a test so a viper change is noticed.
@@ -283,3 +298,14 @@ Rollback means fixing forward: 0.1.1, or 0.2.0 for an API fix, plus a `retract` 
 - **The exact wording of rule failures** (`fails min=1024`, or something closer to prose). It changes no spec, since the spec only requires the rule and its parameter.
 - **A helper that lists every violation from a Validate or Load error.** `Unwrap() []error` covers it for now, and adding one later is a minor bump.
 - **A constitution line preferring text-decoded field types** (`slog.Level`, `netip.Prefix`) over strings parsed in resolvers. It's worth proposing once a ported module needs one.
+
+## Implementation Notes
+
+What changed while applying the first pull request, and why.
+
+- **Delegation needed a second export.** The spec's mode-dispatch scenario expects `messaging.amqp.url`, but composing at the Validator's own key (this decision 4's first draft) gives `messaging.url`. The original had the same gap. `ValidateField(parent, field)` was chosen over pointer identity and author-named keys; decision 4, decision 14, the spec and tasks 5.1, 5.2, 6.1 and 6.2 were updated.
+- **mapstructure reads `mapstructure:"-"` as a key named `-`**, contrary to decision 1's assumption. The rules still treat such a field as having no key (see Context). The validator, which reaches such fields through hand-built values, keys them by Go name.
+- **The tag-pass translation follows values, not types** (decision 2), for interface fields and map entries whose names contain brackets or dots.
+- **The walk descends interface values** (decision 3, rule 5), copying their contents like map values, to match go-playground's tag pass. The spec now lists interface values in both requirements.
+- **Fixed in review:** `Validate` on a `T` of interface type panicked in the tag pass, which took the address of a value it had reached through the interface. The tag pass now hands go-playground the struct value. `ValidateField` couldn't find a field behind an interface field holding a pointer; it now looks through interfaces as the walk does.
+- **Open for the second pull request: `,remain`.** The loader must recognise a `,remain` field, which takes no env names and makes its level accept any key. The shared key rules don't cover it, so either the loader reads that tag option itself, or `config/configvalidator` gains a helper, which after `v0.1.0` means a 0.2.0 release first.

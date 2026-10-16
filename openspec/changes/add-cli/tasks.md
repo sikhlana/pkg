@@ -120,11 +120,28 @@ Side effects and how each is undone:
   - `./cli` removed from `go.work` (go.work must list every module). Run 38840474926 on b95335d: "cli has a go.mod but isn't registered in go.work", annotated on `go.work`. `plan` selected no modules, so lint and test were skipped, and the report had no `cli` row: without the entry, `cli` isn't a library module.
   - Confirm CI OK is green again after the last revert. Run 38840589817 on 1427df6 passed, and the tree matched 12ec404 again (empty diff).
   - Each later push carried the previous revert and the next failure as separate commits, so it took four runs instead of six.
-- [ ] 9.4 Squash-merge. `release.yaml`'s publish creates tag `cli/v0.1.0` on the merge commit, with a GitHub release that's titled with the tag, isn't marked latest, and has notes listing the `cli/` commits. The proxy request succeeds or warns. Record the run.
-- [ ] 9.5 Consumer check against the published version, in a fresh temp module with `GOWORK=off` and no `replace`: `go get github.com/sikhlana/pkg/cli@v0.1.0` resolves through proxy.golang.org and verifies against sum.golang.org, and the 7.3 scratch program builds and prints its version line.
-- [ ] 9.6 pkg.go.dev shows `github.com/sikhlana/pkg/cli@v0.1.0` with the MIT license detected. Request the page if it isn't indexed yet.
-- [ ] 9.7 Re-run the publish run with `gh run rerun`. It reports nothing to create, and no new tag or release appears.
-- [ ] 9.8 Bump-rule check in a follow-up PR that touches only `cli/`. It carries any fix found in 9.5 or 9.6, or else a `cli/README.md` edit worth making.
-  - Pushed without a bump: release check fails.
-  - With `VERSION` at `0.1.1`: it passes.
-  - After merge: publish creates `cli/v0.1.1`, with notes listing only commits since `cli/v0.1.0`.
+- [x] 9.4 Squash-merge. `release.yaml`'s publish creates tag `cli/v0.1.0` on the merge commit, with a GitHub release that's titled with the tag, isn't marked latest, and has notes listing the `cli/` commits. The proxy request succeeds or warns. Record the run. (PR #5 merged as b52f67d. Run 38840778328: `cli | cli/v0.1.0 | created`, with no proxy warning. The release is titled `cli/v0.1.0`, immutable, targets b52f67d, and its notes list the single squashed commit (#5). **Not met: GitHub reports the release as latest.** Publish sends `MakeLatest: "false"`, but GitHub falls back to the newest full release when none is marked. That contradicts release-ci's "SHALL NOT be marked as the repository's latest release"; follow-up for the release-ci spec and tools README, decided after section 10 shows what a second release does.)
+- [x] 9.5 Consumer check against the published version, in a fresh temp module with `GOWORK=off` and no `replace`: `go get github.com/sikhlana/pkg/cli@v0.1.0` resolves through proxy.golang.org and verifies against sum.golang.org, and the 7.3 scratch program builds and prints its version line. (With an empty module cache and `GOPROXY=https://proxy.golang.org`: `cli` v0.1.0 and cobra v1.10.2 downloaded, two `go.sum` lines, `--version` and `version` both printed `scratch dev`, since the scratch directory isn't a git repo. The module zip contains the MIT LICENSE. The proxy's `.info` origin is `refs/tags/cli/v0.1.0` at b52f67d, and sum.golang.org has both hashes.)
+- [x] 9.6 pkg.go.dev shows `github.com/sikhlana/pkg/cli@v0.1.0` with the MIT license detected. Request the page if it isn't indexed yet. (Already indexed at the first check: v0.1.0, MIT, "Redistributable license".)
+- [x] 9.7 Re-run the publish run with `gh run rerun`. It reports nothing to create, and no new tag or release appears. (Attempt 2 of run 38840778328: `cli | cli/v0.1.0 | already released`. Still one release, and `git ls-remote` tags unchanged.)
+- 9.8 moved to section 10: the bump-rule check now rides on a real API change instead of a README edit.
+
+## 10. Follow-up: Main, and the bump-rule check
+
+`Main` and `CommandFunc` are new exports, so this is a **minor** bump (0.1.0 to 0.2.0). gorelease suggests v0.2.0, which lets the pull request test both of check's VERSION floors: above main's VERSION, and at least the API diff's suggestion. Design decision 10 has the reasoning.
+
+- [x] 10.1 Branch `cli-main` off `origin/main` after `git fetch`.
+- [x] 10.2 `CommandFunc` and `Main` in `cli/main.go`. `Main` only calls `os.Exit`, and an unexported `run` does the rest, deferring `stop`.
+- [x] 10.3 Tests:
+  - `run` (through `export_test.go`) returns the exit code and gives commands a live, cancellable context;
+  - a Unix-only test sends SIGINT from inside the `CommandFunc` and gets a `*SignalError` cause instead of a dead test binary;
+  - `Main` in a child re-run of the test binary exits 7.
+- [x] 10.4 `cli/README.md`:
+  - `Main` and `CommandFunc` rows;
+  - the Standalone example rewritten around `cli.Main(newRoot)`, with the `os.Exit(run())` form kept for programs that need the parts;
+  - the example's flag error now wrapped with `%w`.
+- [x] 10.5 In `cli/`: `modernize -fix ./...`, `golangci-lint run --fix ./...` (changed nothing; 0 issues), then the full `go test ./...`. Then `go test -short ./...` across every module in `go.work`.
+- [x] 10.6 Open the PR without touching `cli/VERSION` (still 0.1.0). Release check fails: VERSION must be greater than main's. (PR #6. Run 38841822135 on ac75e93: "cli changed without a VERSION bump: still 0.1.0, as on origin/main", annotated on `cli/VERSION`. gorelease was skipped; lint and test passed.)
+- [x] 10.7 Bump `cli/VERSION` to 0.1.1 in a new commit. Release check fails: below the v0.2.0 gorelease suggests for new exports. (Run 38841939155 on 923395d: "cli's API changes since v0.1.0 need at least 0.2.0, but VERSION is 0.1.1", with gorelease's "Suggested version: v0.2.0 (with tag cli/v0.2.0)". The first real-module run of the API-diff floor.)
+- [x] 10.8 Bump `cli/VERSION` to 0.2.0 in a new commit. Release check passes, and CI OK is green. (Run 38842045244 on 999775a: `| cli | 0.1.0 | 0.2.0 | pass |`, every job passed.)
+- [ ] 10.9 After merge, publish creates `cli/v0.2.0`, with notes listing only commits since `cli/v0.1.0`. Record whether GitHub moves the latest flag to it or leaves it on v0.1.0 (see 9.4).

@@ -10,6 +10,7 @@ The repo has release CI but no library module, so `plan`, `check` and `publish` 
   - **ExitError and one constructor, `Exit(code, err)`, returning `error`.** It works with `errors.New` and `fmt.Errorf` instead of mirroring them. A nil `err` is allowed, and its message is `exit status N`. Cobra still prints errors; a command that wants to exit quietly sets cobra's `SilenceErrors`.
   - **A root command factory.** It sets the name and short description, and a persistent `--config` flag whose name is an exported constant. The flag has no shorthand, so subcommands keep every letter. It also turns usage text off for runtime errors and sets a `--version` flag that prints the build line.
   - **A version subcommand.** It prints the same line as `--version`, taking the program name and version from the root command.
+  - **Main.** Takes a function that builds the root command, and does everything a program's `main` otherwise repeats: starts the signal-aware context, builds and runs the tree with Execute, releases the handler, and exits with the code. It ships in 0.2.0, the follow-up release that also tests the bump rule (task section 10).
   - **Build info.** Values set with `-ldflags -X` take precedence, then whatever the go command stamped into the binary (main module version, VCS revision, commit time, modified flag), then `dev`.
 - How it differs from go-modules' `cli`:
   - `SignalContext` takes a parent context, and a second signal kills the process.
@@ -18,6 +19,7 @@ The repo has release CI but no library module, so `plan`, `check` and `publish` 
   - An `ExitError` with a nil `Err` no longer panics.
   - Build info falls back to `debug.ReadBuildInfo`. `GitCommit` and `BuildDate` become `Revision` and `Time`, and `Time` is the commit time, not the build time.
   - `NewVersionCommand` takes no name.
+  - New `Main` and `CommandFunc` replace the `os.Exit(run())` boilerplate every program's `main.go` carried.
 - Constitution: the receiver rule gets an exception for error types, which take pointer receivers even when small and immutable.
 - Root README gets its first Modules row and loses the "Nothing has shipped yet" line. `go.work` registers `./cli`.
 - The tasks end with a by-hand check of the release flow: failures to trigger on the pull request, the published release and the proxy after merge, a publish re-run that should change nothing, and a follow-up pull request to test the bump rule.

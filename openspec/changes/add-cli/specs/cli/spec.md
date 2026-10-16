@@ -64,6 +64,22 @@ Execute SHALL run the root of the command tree it's given with the caller's cont
 - **WHEN** the caller passes a subcommand instead of the root
 - **THEN** Execute runs the root, and whichever command the arguments select observes the caller's context
 
+### Requirement: Main runs the program and exits with its code
+
+Main SHALL install the module's signal handling before building the program's command tree, run the tree with Execute under the signal-aware context, release the signal handling, and then end the process with Execute's exit code. Main SHALL NOT return to its caller.
+
+#### Scenario: Exit code reaches the process
+- **WHEN** a program's command, run through Main, returns an exit error with code 7
+- **THEN** the process exits with status 7
+
+#### Scenario: Commands run under the signal-aware context
+- **WHEN** a command runs through Main
+- **THEN** its context is live when the command starts and is cancelled by the first SIGINT or SIGTERM
+
+#### Scenario: Signal while building the tree
+- **WHEN** SIGINT arrives while Main is building the command tree
+- **THEN** the process keeps running, and the commands see their context cancelled with that signal as its cause
+
 ### Requirement: Exit errors wrap an optional cause
 
 An exit error SHALL carry a code and an optional underlying error. Its message SHALL be the underlying error's message, or `exit status N` when there's no underlying error, where N is the code Execute returns for it. Error inspection SHALL reach the underlying error and find the exit error anywhere in a wrapping chain. Building or printing an exit error without an underlying error SHALL NOT panic.

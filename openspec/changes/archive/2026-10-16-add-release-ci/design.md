@@ -198,6 +198,32 @@ Rollback: delete the workflows. Releases already published stay, by design.
 
 - Whether to run lint and test on push to main as well, to catch problems from merges landing close together. Deferrable while one person merges with up-to-date branches required.
 
+## What actually happened
+
+Deviations from the design:
+
+- **The workflows run a cached binary, not `go run`** (decision 4). A local composite action, `.github/actions/release-tool`, builds the tool and its pinned gorelease, and caches both under a key hashing everything they're built from. `check --gorelease` takes the prebuilt binary; building on demand (decision 5) remains the local default.
+- **The release workflow sets `concurrency.queue: max`.** With only `cancel-in-progress: false`, GitHub keeps one pending run per group, so a third quick merge would replace the second's pending publish. actionlint doesn't know the key yet, so `.github/actionlint.yaml` ignores it.
+- **`plan` became a third command,** so lint and test start without waiting for gorelease. The proposal was updated to match.
+- **`wsl_v5` was enabled during implementation,** and the constitution gained the empty-line rule it enforces.
+- **The code review reshaped decisions 2, 3, 3a, 5, 10 and 11** (next section). Most visibly: tags follow the go command's layout, and `publish` tags HEAD with no `--sha`.
+
+Rollout, verified:
+- PR #1's CI passed: CI OK passed, and lint and test were skipped with no modules.
+- The release run on the merge commit `ba033b8` created nothing.
+- The repo settings were confirmed through the API:
+  - squash merge only;
+  - an active ruleset on the default branch requiring CI OK with up-to-date branches, and blocking deletion and force pushes;
+  - immutable releases enabled.
+
+Follow-ups left open:
+
+- Lint and test on push to main (the open question below), still deferred.
+- govulncheck and coverage, out of scope here.
+- actionlint runs only locally. Adding it to CI, and dropping the `queue` ignore once actionlint supports the key, are both worth doing.
+- gorelease is experimental and pinned, so it needs checking on each new Go release.
+- The ruleset has no bypass actors, so archive and docs commits also go through a PR. That's intended.
+
 ## Fixes from code review
 
 The review of the first implementation found fifteen issues; all are fixed or settled:
@@ -217,7 +243,7 @@ The review of the first implementation found fifteen issues; all are fixed or se
 
 ## Rollup at archive
 
-Into `docs/release.md`:
+Done: `docs/release.md` now holds this design's lasting reasoning, which was:
 - the decision to create missing tags, and the bump-rule property that makes it correct;
 - the gorelease minimum and the spike's quirks;
 - why testing changed modules is enough under `GOWORK=off`;

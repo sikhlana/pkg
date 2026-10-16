@@ -144,9 +144,9 @@ No library module is touched, so there are no VERSION bump or module README task
 
 ## 10. Rollout
 
-- [ ] 10.1 Open the PR. `ci.yaml` runs, and the CI OK check (job `ci-ok`) passes with no library modules.
-- [ ] 10.2 After merge, `release.yaml` runs, and `publish` creates nothing.
-- [ ] 10.3 You apply the repo settings by hand:
+- [x] 10.1 Open the PR. `ci.yaml` runs, and the CI OK check (job `ci-ok`) passes with no library modules. (PR #1: CI OK passed; lint and test skipped.)
+- [x] 10.2 After merge, `release.yaml` runs, and `publish` creates nothing. (Run on `ba033b8`: "No library modules."; no tags or releases.)
+- [x] 10.3 You apply the repo settings by hand, confirmed through the API:
   - squash merge only;
   - a rule on main requiring the CI OK check (job `ci-ok`) and up-to-date branches;
   - immutable releases on.

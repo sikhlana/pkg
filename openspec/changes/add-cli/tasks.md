@@ -141,7 +141,7 @@ Side effects and how each is undone:
   - the Standalone example rewritten around `cli.Main(newRoot)`, with the `os.Exit(run())` form kept for programs that need the parts;
   - the example's flag error now wrapped with `%w`.
 - [x] 10.5 In `cli/`: `modernize -fix ./...`, `golangci-lint run --fix ./...` (changed nothing; 0 issues), then the full `go test ./...`. Then `go test -short ./...` across every module in `go.work`.
-- [ ] 10.6 Open the PR without touching `cli/VERSION` (still 0.1.0). Release check fails: VERSION must be greater than main's.
-- [ ] 10.7 Bump `cli/VERSION` to 0.1.1 in a new commit. Release check fails: below the v0.2.0 gorelease suggests for new exports.
-- [ ] 10.8 Bump `cli/VERSION` to 0.2.0 in a new commit. Release check passes, and CI OK is green.
+- [x] 10.6 Open the PR without touching `cli/VERSION` (still 0.1.0). Release check fails: VERSION must be greater than main's. (PR #6. Run 38841822135 on ac75e93: "cli changed without a VERSION bump: still 0.1.0, as on origin/main", annotated on `cli/VERSION`. gorelease was skipped; lint and test passed.)
+- [x] 10.7 Bump `cli/VERSION` to 0.1.1 in a new commit. Release check fails: below the v0.2.0 gorelease suggests for new exports. (Run 38841939155 on 923395d: "cli's API changes since v0.1.0 need at least 0.2.0, but VERSION is 0.1.1", with gorelease's "Suggested version: v0.2.0 (with tag cli/v0.2.0)". The first real-module run of the API-diff floor.)
+- [x] 10.8 Bump `cli/VERSION` to 0.2.0 in a new commit. Release check passes, and CI OK is green. (Run 38842045244 on 999775a: `| cli | 0.1.0 | 0.2.0 | pass |`, every job passed.)
 - [ ] 10.9 After merge, publish creates `cli/v0.2.0`, with notes listing only commits since `cli/v0.1.0`. Record whether GitHub moves the latest flag to it or leaves it on v0.1.0 (see 9.4).

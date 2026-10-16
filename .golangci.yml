@@ -321,7 +321,9 @@ linters:
     wsl_v5:
       # Enforces the constitution's empty-line rule. Block statements (and go,
       # defer, send) are never cuddled with the line above, and the default err
-      # check keeps `if err != nil` directly under the call it checks.
+      # check keeps `if err != nil` directly under the call it checks. A defer
+      # releasing what the line above acquired is let back in by an exclusion
+      # below.
       # Default: 1
       cuddle-max-statements: 0
       # Checks to enable on top of the defaults.
@@ -350,6 +352,12 @@ linters:
       - text: 'comment on exported \S+ \S+ should be of the form ".+"'
         source: '// ?(nolint|TODO)'
         linters: [ revive, staticcheck ]
+      # The constitution keeps a defer directly under the statement that
+      # acquired what it releases (ctx, cancel := ...; defer cancel()), which
+      # cuddle-max-statements: 0 can't express. This lifts the limit for defer
+      # alone: an unrelated defer still reports "no shared variables".
+      - text: 'too many statements above defer'
+        linters: [ wsl_v5 ]
       - path: '_test\.go'
         linters:
           - bodyclose

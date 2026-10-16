@@ -176,9 +176,11 @@ context: |
   - Empty lines split a function body into its logical operations:
     each one has an empty line before and after it, except at the
     start or end of a block. Every block statement (if, for, switch,
-    select, and so on) has an empty line before and after it, too. The
-    one exception: an `if err != nil` stays directly under the call
-    that returned the error it checks.
+    select, and so on) has an empty line before and after it, too. Two
+    exceptions: an `if err != nil` stays directly under the call that
+    returned the error it checks, and a defer stays directly under the
+    statement that acquired what it releases (ctx, cancel := ...;
+    defer cancel()).
   - Don't hand-fix formatting; golangci-lint --fix owns it.
 
   Testing:
@@ -213,7 +215,9 @@ context: |
     (t.Context), and package-level slog and log calls (an injected
     *slog.Logger). wsl_v5 enforces the empty-line rule: its default
     checks plus empty lines after blocks, with nothing cuddled above a
-    block.
+    block. A defer sharing a variable with the line above is let back
+    in by an exclusion on wsl_v5's "too many statements above defer"
+    report.
   - golangci-lint runs from a module's directory and picks up the root
     .golangci.yml by walking up.
   - Verification, in order. On each touched module: modernize -fix,

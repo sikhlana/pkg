@@ -96,7 +96,7 @@ Names that normalise alike, such as `my-svc` and `my_svc`, share a prefix, so tw
 
 Only those names, and their `_FILE` twins, are read. A variable named after a section, such as `MY_SVC_HTTP`, changes nothing, and neither does a misspelt one.
 
-Two keys that would share an env name fail the load with `ErrEnvNameCollision`, naming both: `http.read_timeout` beside `http_read.timeout`, or `tls.key` beside `tls.key_file`, whose env name is `tls.key`'s `_FILE` twin. Name a module's own path fields `*_path` instead.
+Two keys that would share an env name fail the load with `ErrEnvNameCollision`, naming both: `http.read_timeout` beside `http_read.timeout`, or `tls.key` beside `tls.key_file`, whose env name is `tls.key`'s `_FILE` twin. Name a field that holds a file the module reads itself `*_file`, with no `x` beside it, and a path used as a path `*_path`.
 
 Values decode by type wherever they come from: `30s` into a `time.Duration`, `a, b` into a slice with the spaces around each element trimmed, and a text-decoded type from its text form. A `[]byte` takes the string's bytes as they are, commas included, so a key can come from a `_FILE` secret. A value that fails to decode fails the load, naming the key and the type, never the value.
 
@@ -104,7 +104,7 @@ Values decode by type wherever they come from: `30s` into a `time.Duration`, `a,
 
 `MY_SVC_DB_PASSWORD_FILE` names a file whose contents become `db.password`'s value, at environment priority, so it beats the config file. The file is read once, during the load, with trailing `\r` and `\n` removed and nothing else changed. It must be no larger than 1 MiB. Setting both `MY_SVC_DB_PASSWORD` and `MY_SVC_DB_PASSWORD_FILE` fails with `ErrEnvAndFileSet`; an empty `_FILE` variable counts as unset. The secret never goes into the process environment, and no error contains it.
 
-The file isn't re-read, so a credential that rotates while the program runs belongs in a `*_path` field that the module re-reads itself.
+The file isn't re-read, so a credential that rotates while the program runs belongs in a `*_file` field that the module re-reads itself.
 
 #### Map entries
 

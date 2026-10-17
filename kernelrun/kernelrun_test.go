@@ -265,6 +265,7 @@ func TestRunnerExitingThroughGoexit(t *testing.T) {
 	)
 
 	require.EqualError(t, err, "running worker: exited without returning")
+	require.ErrorIs(t, err, kernelrun.ErrExited)
 	assert.True(t, waiterCancelled, "the other runner was stopped")
 	assert.True(t, stopped)
 }

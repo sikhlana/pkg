@@ -62,7 +62,7 @@ Both `&` and `;` SHALL separate query entries, and each separator SHALL be kept 
 
 ### Requirement: Path parameters are masked
 
-In each path segment, everything after the first `;` SHALL be treated as `;`-separated parameters and masked by the same rules as query entries: a parameter's value becomes `***`, and a bare parameter becomes `***` whole. The part of each segment before the first `;` SHALL be kept as written, escaped form included.
+In each path segment, everything after the first `;` SHALL be treated as `;`-separated parameters and masked by the same rules as query entries: a parameter's value becomes `***`, and a bare parameter becomes `***` whole. The part of each segment before the first `;` SHALL be kept as written, escaped form included. Only a literal `;` SHALL start path parameters: an escaped one (`%3B`) is data, and SHALL be passed through with the rest of its segment.
 
 #### Scenario: A session ID in a path parameter
 - **WHEN** a URL with the path `/app/cart;jsessionid=8F3A1C/items` is masked
@@ -75,6 +75,10 @@ In each path segment, everything after the first `;` SHALL be treated as `;`-sep
 #### Scenario: Escaped characters in the path
 - **WHEN** a URL with the path `/a%20b/p%2Fq;k=v` is masked
 - **THEN** its path becomes `/a%20b/p%2Fq;k=***`
+
+#### Scenario: An escaped semicolon
+- **WHEN** a URL with the path `/a%3Bjsessionid=8F3A1C` is masked
+- **THEN** its path stays `/a%3Bjsessionid=8F3A1C`
 
 ### Requirement: Passwords are redacted and usernames kept
 
@@ -98,11 +102,15 @@ The fragment SHALL be removed, together with its `#`.
 
 ### Requirement: The rest of the URL is passed through
 
-The scheme, host and port SHALL be kept as written, and a URL with no query, user information, fragment or path parameters SHALL come back unchanged.
+The host and port SHALL be kept as written, and the scheme SHALL come out lowercase. A URL with a lowercase scheme and no query, user information, fragment or path parameters SHALL come back unchanged.
 
 #### Scenario: A URL with nothing to mask
 - **WHEN** `https://example.com:8443/a/b` is masked
 - **THEN** the result is `https://example.com:8443/a/b`
+
+#### Scenario: An uppercase scheme
+- **WHEN** `HTTPS://Example.com/x?t=1` is masked
+- **THEN** the result is `https://Example.com/x?t=***`
 
 #### Scenario: Everything at once
 - **WHEN** `https://alice:pw@example.com:8443/a;sid=1/b?x=1&tok#frag` is masked
@@ -158,7 +166,7 @@ The module SHALL provide a log value for a URL that resolves to the same string 
 
 ### Requirement: Names and path segments aren't masked
 
-Query keys, path parameter names, path segments outside their parameters, usernames and hosts SHALL be logged as written. A secret placed in one of them is not masked, and consumers MUST NOT rely on the masking for them.
+Query keys, path parameter names, path segments outside their parameters (an escaped `;` included), usernames and hosts SHALL be logged as written. A secret placed in one of them is not masked, and consumers MUST NOT rely on the masking for them.
 
 #### Scenario: A secret used as a query key
 - **WHEN** a URL with the query `sk_live_abc=1` is masked

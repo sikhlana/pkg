@@ -93,7 +93,7 @@ Alternative: an `Attr(key string, u *url.URL) slog.Attr` helper. It would hide t
 - A table test per spec requirement, run through `URL`, with the string-form scenarios run through `Raw` too, so every scenario checks that both forms agree.
 - A test that the caller's URL is unchanged after `URL`.
 - A test that runs `Value` through `slog.NewTextHandler` writing to a buffer.
-- `FuzzRaw`, seeded from the table, checking properties that hold for any input: it never panics; `Raw(Raw(s)) == Raw(s)`, since masked output has nothing left to mask; and output from a parseable, non-opaque input parses back with no fragment, no password other than `xxxxx`, and every query entry either `***` or `<key>=***`. Checking structure, not substrings, keeps short passwords such as `a` from failing on a coincidental match elsewhere in the URL. Plain `go test` runs it over the seed corpus only, so it doesn't slow the `-short` sweep.
+- `FuzzRaw`, seeded from the table and from `testdata/fuzz/FuzzRaw`, checking properties that hold for any input. It never panics. Masking is stable from the second pass on (`Raw(Raw(Raw(s))) == Raw(Raw(s))`): net/url doesn't always format a URL as something that parses back the same, so a second pass may mask more, never less. And when the input is parseable and non-opaque and the output parses back, the output has no fragment, no password other than `xxxxx`, and every query entry and path parameter either `***` or `<key>=***`. Checking structure, not substrings, keeps short passwords such as `a` from failing on a coincidental match elsewhere in the URL. Plain `go test` runs it over the seed corpus only, so it doesn't slow the `-short` sweep.
 
 ## Risks / Trade-offs
 
@@ -108,3 +108,38 @@ Durable rationale to roll into docs at archive: why keys are kept while values a
 ## Migration Plan
 
 Nothing consumes the module yet. One pull request carries the module, its root README row and its `go.work` entry. The module requires no sibling, so there's no release order. Merging publishes `url/urlmask/v0.1.0`.
+
+## Fixes from code review
+
+The review raised seven findings, and a check of them added one more. All were fixed:
+
+- **`FuzzRaw`'s idempotence check failed** on `A:/%2F `. net/url formats its host-less `//` path as `a:%2F/%20`, which parses as opaque, so a second pass masked more. That's a net/url round-trip quirk, not a leak. As Risks planned, the property now compares the second and third passes, and the input is a committed seed (`testdata/fuzz/FuzzRaw/host-less-double-slash`). The fresh fuzz run after the fix found a sibling, `/%2F `: its literal space makes net/url drop `RawPath` and format the path `// ` as `//%20`, which doesn't parse at all. The structural checks now skip output that doesn't parse back, which net/url's formatting causes and masking can't. That input is the second seed (`relative-double-slash`), and a further 60-second run, 13.7 million executions, found nothing.
+- **`FuzzRaw` didn't check path parameters.** It now checks that every parameter in the masked path is `***` or `<name>=***`. Confirmed it fails when `maskPath` stops masking.
+- **An escaped `;` (`%3B`) doesn't start a path parameter.** That's correct under RFC 3986, so the behaviour stays. The spec, godoc and README now say so, with a scenario.
+- **The spec said the scheme is kept as written,** but `url.Parse` lowercases it. The spec, godoc and README now say it comes out lowercase, with a scenario.
+- **`TestURLLeavesCallerUnchanged` compares the whole URL and its `Userinfo`,** not five chosen fields.
+- **The `url.PathUnescape` error branch can't be reached.** It stays, since it fails closed, with a comment saying why.
+- **`maskEntries` sizes its builder for the worst case,** `len(Masked)-1` extra bytes per entry, instead of the input's length.
+
+## What actually happened
+
+Delivered as designed, on the `add-urlmask` branch: the order of operations in `URL`, the shared entry masker, the escaped-form path handling and the deferred `Value` all shipped as decisions 1–6 describe.
+
+Deviations from the design as first written:
+
+- **`FuzzRaw`'s properties were weakened** for net/url's formatting quirks, as Risks anticipated. Decision 7 describes what ships, and the review section above has the two inputs behind it.
+- **Tests go beyond the spec's scenarios** in a few rows: a value made only of `=` characters, a relative reference, an uppercase scheme and an escaped `;`. The last two became spec scenarios in review.
+
+Follow-ups left open:
+
+- **An allow-list of safe query keys** (`page`, `lang`), as an additive type, when a consumer asks for one.
+- **An `Attr(key, u)` helper,** if call sites tire of `slog.Any` with `Value`.
+- **Secrets in path segments** (`/reset/<token>`), perhaps through a consumer-supplied hook, if a consumer needs it.
+- **Consumers:** the future `http/accesslog` and `http/httpclient` modules are expected to mask through this one.
+- **Release:** merging publishes `url/urlmask/v0.1.0`. Checking the published release happens after merge.
+
+## Rollup at archive
+
+- **docs:** none. Only one module masks URLs for logging so far, so the rationale (keys kept while values are masked, `&` and `;` both separating entries, masking on escaped forms, the `xxxxx` password placeholder) lives in the module's README and this archive. It moves to a `docs/logging.md` once a second module adds its own masking policy.
+- **Constitution:** unchanged.
+

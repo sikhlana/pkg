@@ -230,3 +230,66 @@ Decisions 2, 5, 6, 7, 9, 11 and 12 (nil means disabled, `GetCertificate` only, l
 ## Migration Plan
 
 Nothing consumes the module yet. One pull request carries the new module, the constitution amendments, `kernelrun`'s exported `ErrExited`, `docs/tls.md`, the `docs/config.md` edit and the two README-only patch bumps (`config/configloader`, `config/configvalidator`). The new module requires no sibling, so there's no release order. Merging publishes all four tags.
+
+## What actually happened
+
+Delivered in one pull request, #19, merged as 9724a18. It published `tls/tlsconfig/v0.1.0`, `kernelrun/v0.2.0`, `config/configloader/v0.1.2` and `config/configvalidator/v0.1.1`.
+
+Deviations from the design as first written:
+
+- **Two modules became one.** The change was built as `tls/tlsclientconfig` and `tls/tlsserverconfig` (task sections 1–7), then merged into `tls/tlsconfig` once review showed the client's key pair had to refresh too (decision 9, task section 8). The two first modules were never released.
+- **A client's CAs refresh.** The first design read `ca_file` once. It now goes through a reloader and is verified in the hooks, with a backstop (decision 11, task section 9).
+- **An end-to-end test was added** (task section 10): mutual TLS over HTTP/2 between an `http.Server` and an `http.Client` through a leaf rotation and a cert-manager-style CA rotation, in real time with a 100ms interval, since synctest can't drive real sockets.
+- **A nil logger discards** rather than being checked for at every record (task section 12).
+- **Tests use a buffered in-memory connection, not `net.Pipe`,** which deadlocks when one side aborts a handshake mid-flight (see Context).
+- **Validity checks, load-time records and leaf details in records** came out of the third review (task section 13), not the first design.
+- **`kernelrun` exports `ErrExited`** under the new exported-sentinel rule (task section 14), so the change touched a fourth released module.
+
+## Fixes from code review
+
+The first review raised nine findings (task section 7). Seven were fixed:
+
+- `client_ca_file` beside a policy that doesn't verify is rejected with `ErrClientCAUnused`.
+- `TLSConfig`'s godoc says expiry is checked against the returned config's `Time`.
+- Key pair load errors name both files.
+- The reloader keeps a SHA-256 digest of each file, not its bytes.
+- The client's two `ca_file` errors share one wording.
+- The review's finding on the client's read-once key pair led to the merge into one module (decision 9).
+- The review's finding on read-once CAs led to decision 11.
+
+Two were rejected: keyed `configvalidator.Error` values would mean importing `configvalidator` (decision 3), and a hung filesystem blocks only the one handshake that runs the check.
+
+The second review (task section 11):
+
+- **A regression.** With `ca_file`, a client couldn't reach a server by IP address, because crypto/tls empties `ConnectionState.ServerName` for IPs. → `server_name` stands in, and the error says to set it.
+- `ca_file` beside `insecure_skip_verify` stays tolerated (decision 11).
+- The system-roots scenario expects any certificate verification error, since platform verifiers don't all report an unknown authority.
+- The end-to-end test requires the `bad certificate` alert.
+- The README notes the spurious Warn when a swap lands between a key pair's two reads.
+- The CA-file setup moved into `verifyWithCAFile`, under gocognit's limit.
+
+The third review checked every hook against native behaviour (task section 13, decision 12):
+
+- `GetClientCertificate` honours `SupportsCertificate`.
+- The server has a `VerifyPeerCertificate` backstop.
+- Values are logged when first loaded, with leaf details.
+- A refreshed pair outside its validity window is rejected with `ErrCertificateNotCurrent`.
+- The two verifiers share `verifyChain`.
+- `ErrNoServerName` and `ErrNoServerCertificate` are exported.
+- The constitution gained the exported-sentinel rule.
+- One finding was left as documented: retrying sooner after a key pair's two reads straddle a swap.
+
+## Follow-ups left open
+
+- **Retrying sooner after a straddled swap,** left documented (third review, finding 5).
+- **A generic file or secret watcher (`secretloader`),** when a consumer needs push notification.
+- **Operator control over versions, cipher suites, curves or ALPN.** A consumer sets them on the returned config.
+- **OCSP stapling, SCTs and SNI-selected certificates.**
+- **FIPS mode's chain filter and ECH's public-name check** aren't matched by the hooks (decision 12). Neither is in use.
+
+## Rollup at archive
+
+- **Constitution:** the `*_file`/`*_path` split and the exported-sentinel rule shipped in #19.
+- **docs/tls.md** (new): decisions 2, 5, 6, 7, 9, 11 and 12, rechecked against what was built: one module, nil means disabled, `GetCertificate` only, lazy refresh in the module, a client's CAs in its hooks with a backstop, a server's client CAs in `VerifyConnection`, and hooks matching native behaviour.
+- **docs/config.md:** rotating credentials go in `*_file` fields that a module re-reads, with `tls/tlsconfig` as the example.
+- **The rest** (the policy table, error wordings, log records) is specific to the module and lives in its spec, README and this archive.

@@ -8,4 +8,5 @@ use (
 	./kernelrun
 	./log
 	./tls/tlsconfig
+	./url/urlmask
 )

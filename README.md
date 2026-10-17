@@ -15,6 +15,7 @@ Each module gets a row here, in alphabetical order, as it lands. Import paths fo
 | [kernelrun](./kernelrun) | Runs an fx app's named runners between its start and stop: the first to return stops the rest, panics become crashes, and OnStop hooks see the outcome |
 | [log](./log) | Builds the app's slog logger from developer wiring: level, format, destination, pluggable text handlers and record middleware |
 | [tls/tlsconfig](./tls/tlsconfig) | Turns client and server TLS settings into a tls.Config that re-reads rotating key pairs and CA files during handshakes, with client certificate policies |
+| [url/urlmask](./url/urlmask) | Turns a URL into a string that's safe to log, masking query and path parameter values, passwords and fragments while keeping its shape |
 
 ## Installation
 

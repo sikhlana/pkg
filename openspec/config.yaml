@@ -186,8 +186,16 @@ context: |
     methods (UnmarshalText, UnmarshalJSON and the like) take a pointer
     receiver on a type whose other methods take values, as slog.Level
     does, so its constants still satisfy encoding.TextMarshaler.
-  - Errors: lowercase gerund, no trailing period, wrapped with %w
-    ("creating client: %w"). Documented failure modes are exported
+  - Errors: lowercase, no trailing period (staticcheck's ST1005). A
+    wrap names the operation in progress as a gerund and adds only
+    what the callee doesn't already report ("loading key pair %s: %w"),
+    never "failed to" or "error"; detail the wrapped error lacks, such
+    as a command's stderr, follows it ("running git %s: %w: %s"). A
+    sentinel carrying detail comes first ("%w: %q"). Sentinel and leaf
+    messages are noun phrases or claims ("invalid version"). A panic
+    message starts with its package and function, as the standard
+    library's do ("configvalidator: ValidateField: ..."), since no
+    caller adds context to it. Documented failure modes are exported
     sentinels checked with errors.Is. Every sentinel is an exported
     Err* variable, even one that only a log record or a wrapped error
     carries today, so a caller can always match it; package main is

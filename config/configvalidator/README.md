@@ -88,23 +88,23 @@ if errs, ok := errors.AsType[configvalidator.Errors](err); ok {
 Checks that tags can't express go in a `Validate() error` method. Return an exported sentinel so callers can match it with `errors.Is`, and an `*Error` to name the key it's about:
 
 ```go
-var ErrMissingCert = errors.New("cert_path is required when ssl is enabled")
+var ErrMissingCert = errors.New("cert_file is required when ssl is enabled")
 
 type SSLConfig struct {
 	Enabled  bool   `mapstructure:"enabled"`
-	CertPath string `mapstructure:"cert_path"`
+	CertFile string `mapstructure:"cert_file"`
 }
 
 func (c SSLConfig) Validate() error {
-	if c.Enabled && c.CertPath == "" {
-		return &configvalidator.Error{Key: "cert_path", Err: ErrMissingCert}
+	if c.Enabled && c.CertFile == "" {
+		return &configvalidator.Error{Key: "cert_file", Err: ErrMissingCert}
 	}
 
 	return nil
 }
 ```
 
-Under `http.ssl`, that reports `http.ssl.cert_path: cert_path is required when ssl is enabled`.
+Under `http.ssl`, that reports `http.ssl.cert_file: cert_file is required when ssl is enabled`.
 
 `Validate` calls the outermost `Validate` method in each branch of the config, with a value or a pointer receiver, and doesn't look for others beneath it: that method owns its branch. It isn't called when a tag failed on it or anything beneath it, since its checks may rely on what the tags guarantee. Methods in other branches still run. A method must not pass its own receiver to `Validate`, which would call it again.
 

@@ -131,7 +131,11 @@ context: |
     or version.
   - A Config never has both x and x_file, since config/configloader
     reads X_FILE as a file holding X and the two env names would
-    collide. A module's own path fields are named *_path.
+    collide.
+  - A *_file field names a file the module reads itself and may
+    re-read, a live counterpart to configloader's _FILE. A *_path
+    field is a path used as a path (a socket, a directory). A
+    credential that rotates belongs in a *_file field.
   - Developer wiring (loggers, HTTP clients, callbacks, component
     names) is a typed fx value with a pair of helpers: AsX annotates a
     value or a constructor, WithX(v) wraps fx.Supply(AsX(v)). Ship both
@@ -184,7 +188,10 @@ context: |
     does, so its constants still satisfy encoding.TextMarshaler.
   - Errors: lowercase gerund, no trailing period, wrapped with %w
     ("creating client: %w"). Documented failure modes are exported
-    sentinels checked with errors.Is. Use errors.AsType[T], not
+    sentinels checked with errors.Is. Every sentinel is an exported
+    Err* variable, even one that only a log record or a wrapped error
+    carries today, so a caller can always match it; package main is
+    exempt, since nothing can import it. Use errors.AsType[T], not
     errors.As.
   - Modules log through an injected *slog.Logger, never through the
     standard library's slog or log package-level functions.

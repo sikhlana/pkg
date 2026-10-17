@@ -7,4 +7,5 @@ use (
 	./kernel
 	./kernelrun
 	./log
+	./tls/tlsconfig
 )

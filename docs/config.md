@@ -49,9 +49,9 @@ A single underscore separates segments, as operators expect, which makes names a
 
 Container platforms mount secrets as files, and putting a secret in an environment variable leaks it to child processes and crash dumps. So every key also reads `<ENV>_FILE`: the file it names is read once, during the load, and its contents go into viper's override layer with `Set`. Since `X` and `X_FILE` can't both be set, that lands exactly at environment priority. The loader never calls `os.Setenv`, which would put the secret back into the environment the feature exists to keep it out of, and would leak between loads in one process.
 
-That rule is why a Config never has both `x` and `x_file`: the second's env name is the first's file twin. A module that takes a path to read itself names the field `*_path`.
+That rule is why a Config never has both `x` and `x_file`: the second's env name is the first's file twin. A module that reads a file itself names the field `*_file`, and a field holding a path used as a path, such as a socket or a directory, `*_path`.
 
-`_FILE` is read once, so a rotating credential doesn't belong there. A module that needs one takes a `*_path` field and re-reads the file, as Azure's SDK does with `AZURE_FEDERATED_TOKEN_FILE`.
+`_FILE` is read once, so a rotating credential doesn't belong there. A module that needs one takes a `*_file` field and re-reads the file, as Azure's SDK does with `AZURE_FEDERATED_TOKEN_FILE`, and as `tls/tlsconfig` does with its key pairs and CA files ([tls.md](tls.md)).
 
 ## Handing sections to modules with fx.Out
 

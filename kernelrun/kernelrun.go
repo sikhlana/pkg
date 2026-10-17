@@ -50,8 +50,9 @@ type runParams struct {
 	Logger  *slog.Logger `optional:"true"`
 }
 
-// errExited is the crash a runner that exits through runtime.Goexit, without returning, becomes.
-var errExited = errors.New("exited without returning")
+// ErrExited is the crash a runner that exits through runtime.Goexit, without returning, becomes. Run wraps it with the
+// runner's name.
+var ErrExited = errors.New("exited without returning")
 
 // panicError is the crash a runner's recovered panic becomes.
 type panicError struct {
@@ -184,7 +185,7 @@ func runAll(ctx context.Context, logger *slog.Logger, runners []Runner) []error 
 			// Deferred, so a runner that exits through runtime.Goexit still ends the run, as a crash.
 			defer func() {
 				if !returned {
-					err = errExited
+					err = ErrExited
 				}
 
 				// Classified before the cancellation below, so a first runner returning context.Canceled of its own

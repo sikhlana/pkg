@@ -192,6 +192,12 @@ linters:
         - pattern: ^fx\.Shutdowner$
           pkg: ^go\.uber\.org/fx$
           msg: Return from a kernelrun runner instead; kernelrun.Run never listens for a shutdown request.
+        - pattern: ^otel\.(Tracer|Meter|GetTracerProvider|GetMeterProvider|GetTextMapPropagator)$
+          pkg: ^go\.opentelemetry\.io/otel$
+          msg: Take the trace.TracerProvider, metric.MeterProvider or propagation.TextMapPropagator by injection; the globals are set only when an app lists telemetry.InstallGlobals.
+        - pattern: ^otel\.(SetTracerProvider|SetMeterProvider|SetTextMapPropagator)$
+          pkg: ^go\.opentelemetry\.io/otel$
+          msg: List telemetry.InstallGlobals instead; it's the one place that sets OpenTelemetry's globals, which stay set for the rest of the process.
 
     funcorder:
       # Checks if the exported methods of a structure are placed before the non-exported ones.

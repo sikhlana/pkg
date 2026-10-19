@@ -95,14 +95,16 @@ context: |
     and kernelrun and kernel, which build and run the app rather than
     join its graph.
   - fx.Module names are the module's package name ("log",
-    "configloader").
+    "configloader"). A package inside a module, below its root, uses
+    its path in the repo instead ("telemetry/trace"), so its fx logs
+    and tags can't collide with a same-named package elsewhere.
   - Every constructor registered with fx.Provide takes a single Params
     struct embedding fx.In, even for one dependency. Name it Params, or
     by purpose (PublisherParams) when a module has several. The
     fx.Lifecycle field is named Lifecycle. Optional dependencies use
     `optional:"true"`.
   - Name tags are name:"<module>:<purpose>:<name>", where <module> is
-    the package name, as in group tags below. An exported helper
+    the fx.Module name, as in group tags below. An exported helper
     (ConfigNameTag(name)) builds them so callers never format them.
     Group tags are group:"<module>:<purpose>", exposed as an exported
     constant. A new group ships the constant, a typed ProvideX helper
@@ -136,6 +138,11 @@ context: |
     re-read, a live counterpart to configloader's _FILE. A *_path
     field is a path used as a path (a socket, a directory). A
     credential that rotates belongs in a *_file field.
+  - Operator config reaches a module through configloader, with one
+    exception: telemetry also honours OpenTelemetry's OTEL_*
+    environment variables, below its Config, because operators and the
+    OpenTelemetry ecosystem expect them to work. No other module reads
+    the environment itself.
   - Developer wiring (loggers, HTTP clients, callbacks, component
     names) is a typed fx value with a pair of helpers: AsX annotates a
     value or a constructor, WithX(v) wraps fx.Supply(AsX(v)). Ship both
@@ -168,6 +175,11 @@ context: |
   - A module doesn't import a sibling just to integrate with it. It
     exposes a value (a check func, a handler) and the consuming app
     wires the integration.
+  - Modules take trace.TracerProvider and
+    propagation.TextMapPropagator (and, later, metric.MeterProvider)
+    by injection, never from OpenTelemetry's globals. Only
+    telemetry.InstallGlobals sets the globals, for third-party code
+    that can only read them.
   - An integration that pulls a heavy dependency lives in a subpackage
     (<module>/<integration>) so consumers that don't import it don't
     build it.
@@ -262,7 +274,12 @@ context: |
     and log packages (an injected *slog.Logger), and key-value pairs in
     logging calls (typed attributes, through sloglint's attr-only).
     fx.Shutdowner is banned too: kernelrun.Run never listens for it,
-    and returning from a runner already ends the app.
+    and returning from a runner already ends the app. So are
+    OpenTelemetry's global getters (otel.Tracer, otel.Meter,
+    otel.GetTracerProvider, otel.GetMeterProvider,
+    otel.GetTextMapPropagator), for injection, and its global setters
+    (otel.SetTracerProvider, otel.SetMeterProvider,
+    otel.SetTextMapPropagator), for telemetry.InstallGlobals.
     wsl_v5 enforces the empty-line rule: its default
     checks plus empty lines after blocks, with nothing cuddled above a
     block. A defer sharing a variable with the line above is let back
@@ -292,6 +309,12 @@ context: |
     needs, the package name is the module's identity: its fx.Module
     name, the <module> segment of its name and group tags, its spec
     folder and its commit scope.
+  - A group directory may itself be a module (telemetry). Packages
+    inside a module are named for their role (telemetry/trace,
+    telemetry/trace/otlpgrpc), not <group><name>; the
+    <group>/<group><name> rule is for nested modules. Such a package
+    takes its repo path as its fx.Module name and tag prefix, and
+    shares its module's spec and commit scope.
   - Consumer-facing doubles are the one exception to
     <group>/<group><name>: they live at testing/<module>test
     (testing/logtest), and their package name still equals their

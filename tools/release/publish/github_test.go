@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sikhlana/pkg/tools/release/publish"
+	"github.com/sikhlana/pkg/tools/release/repository"
 )
 
 var _ publish.Releases = publish.GitHub{}
@@ -34,10 +35,9 @@ func newGitHub(t *testing.T, handler http.Handler) publish.GitHub {
 }
 
 func TestNewGitHubRejectsInvalidRepository(t *testing.T) {
-	for _, repository := range []string{"", "sikhlana", "/pkg", "sikhlana/", "a/b/c"} {
-		_, err := publish.NewGitHub(nil, repository)
-		require.ErrorIs(t, err, publish.ErrRepository, repository)
-	}
+	// repository.Parse's own tests cover every invalid form.
+	_, err := publish.NewGitHub(nil, "sikhlana")
+	require.ErrorIs(t, err, repository.ErrInvalid)
 }
 
 func TestGitHubExists(t *testing.T) {

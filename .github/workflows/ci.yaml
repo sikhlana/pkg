@@ -94,6 +94,44 @@ jobs:
         working-directory: ${{ matrix.module }}
         run: go test ./...
 
+  vulncheck:
+    name: Vulnerabilities (${{ matrix.module }})
+    needs: plan
+    if: needs.plan.outputs.empty == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.plan.outputs.modules) }}
+    env:
+      GOWORK: "off"
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # With the module's dependency cache, as the test job has; the action
+      # below only sets Go up for itself when it has to build.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache-dependency-path: ${{ matrix.module }}/go.mod
+      # Brings the govulncheck tools/release/go.mod pins, without setting Go up
+      # a second time over the cache restored above.
+      - name: Get the release tool
+        id: tool
+        uses: ./.github/actions/release-tool
+        with:
+          setup-go: "false"
+      - name: Run govulncheck
+        working-directory: ${{ matrix.module }}
+        env:
+          GOVULNCHECK: ${{ steps.tool.outputs.govulncheck }}
+        run: |
+          "${GOVULNCHECK}" ./...
+
   release-check:
     name: Release check
     runs-on: ubuntu-latest
@@ -118,7 +156,7 @@ jobs:
           "${RELEASE}" check --base "origin/${BASE_REF}" --gorelease "${GORELEASE}"
 
   tools-release:
-    name: Lint and test tools/release
+    name: Lint, test and scan tools/release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -141,13 +179,17 @@ jobs:
       - name: Run tests
         working-directory: tools/release
         run: go test ./...
+      - name: Run govulncheck
+        working-directory: tools/release
+        # tool covers gorelease and govulncheck, built from this go.mod too.
+        run: go tool govulncheck ./... tool
 
-  # The one check branch protection requires, by its name, CI OK. Skipped lint
-  # and test matrices count as passing.
+  # The one check branch protection requires, by its name, CI OK. Skipped lint,
+  # test and vulnerability matrices count as passing.
   ci-ok:
     name: CI OK
     if: always()
-    needs: [plan, lint, test, release-check, tools-release]
+    needs: [plan, lint, test, vulncheck, release-check, tools-release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

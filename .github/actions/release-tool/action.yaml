@@ -1,12 +1,17 @@
 name: Release tool
 description: >-
-  Restore the release tool and the gorelease it pins from the cache, or build
-  and cache them.
+  Restore the release tool and the gorelease and govulncheck it pins from the
+  cache, or build and cache them.
 
 inputs:
   go:
     description: Set up Go even on a cache hit, for steps that run the go command.
     default: "false"
+  setup-go:
+    description: >-
+      Set Go up at all. "false" when the job already has, with its own
+      dependency cache: a second setup-go would restore another cache over it.
+    default: "true"
 
 outputs:
   release:
@@ -15,6 +20,9 @@ outputs:
   gorelease:
     description: Path to the gorelease binary pinned by tools/release/go.mod.
     value: ${{ steps.paths.outputs.gorelease }}
+  govulncheck:
+    description: Path to the govulncheck binary pinned by tools/release/go.mod.
+    value: ${{ steps.paths.outputs.govulncheck }}
 
 runs:
   using: composite
@@ -28,6 +36,7 @@ runs:
           echo "dir=${dir}"
           echo "release=${dir}/release"
           echo "gorelease=${dir}/gorelease"
+          echo "govulncheck=${dir}/govulncheck"
         } >> "${GITHUB_OUTPUT}"
 
     - name: Restore from cache
@@ -36,12 +45,12 @@ runs:
       with:
         path: ${{ steps.paths.outputs.dir }}
         # Everything the binaries are built from: the Go version, the tool's
-        # dependencies (gorelease included), its non-test sources, and this
-        # action, whose Build step says how.
+        # dependencies (gorelease and govulncheck included), its non-test
+        # sources, and this action, whose Build step says how.
         key: release-tool-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.go-version', '.github/actions/release-tool/action.yaml', 'tools/release/go.mod', 'tools/release/go.sum', 'tools/release/**/*.go', '!tools/release/**/*_test.go') }}
 
     - name: Set up Go to build
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.cache.outputs.cache-hit != 'true' && inputs.setup-go == 'true'
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: .go-version
@@ -55,9 +64,11 @@ runs:
         GOWORK: "off"
         RELEASE: ${{ steps.paths.outputs.release }}
         GORELEASE: ${{ steps.paths.outputs.gorelease }}
+        GOVULNCHECK: ${{ steps.paths.outputs.govulncheck }}
       run: |
         go build -o "${RELEASE}" .
         go build -o "${GORELEASE}" golang.org/x/exp/cmd/gorelease
+        go build -o "${GOVULNCHECK}" golang.org/x/vuln/cmd/govulncheck
 
     # Saved straight away rather than in a post step, so a job that fails later
     # still fills the cache.
@@ -70,7 +81,7 @@ runs:
 
     # No dependency cache: the binaries are already built.
     - name: Set up Go to run
-      if: steps.cache.outputs.cache-hit == 'true' && inputs.go == 'true'
+      if: steps.cache.outputs.cache-hit == 'true' && inputs.go == 'true' && inputs.setup-go == 'true'
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with:
         go-version-file: .go-version

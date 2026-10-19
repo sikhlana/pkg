@@ -12,7 +12,7 @@ A personal library of reusable Go modules, wired through [Uber fx](https://uber-
 | <module>/README.md              | One module's Configuration, Exported Members and Usage                                                                              |
 | openspec/specs/<module>/spec.md | The behavioural guarantees a module makes to consumers                                                                              |
 | docs/<topic>.md                 | Why a cross-module pattern or trade-off is shaped the way it is                                                                     |
-| tools/release/README.md         | The release CI tool: what plan, check and publish enforce on pull requests and main                                                 |
+| tools/release/README.md         | The release CI tool: what plan, check and publish enforce on pull requests and main, and the weekly vulncheck scan and its issue    |
 
 ## Making a change
 
@@ -27,7 +27,10 @@ go generate ./...              # only if a mocked interface changed
 modernize -fix ./...
 golangci-lint run --fix ./...  # re-run without --fix if it changed files
 go test ./...
+govulncheck ./...
 ```
+
+Use the govulncheck CI uses, pinned by `tools/release/go.mod`'s tool directive: `cd tools/release && GOWORK=off go install golang.org/x/vuln/cmd/govulncheck` installs that version.
 
 Then the short sweep across every module in `go.work`:
 
@@ -39,8 +42,9 @@ go list -m -f '{{.Dir}}' | while IFS= read -r mod; do (cd "$mod" && go test -sho
 
 ```bash
 cd tools/release
-GOWORK=off go generate ./...              # only if publish.Releases changed
+GOWORK=off go generate ./...              # only if publish.Releases or vulncheck.Tracker changed
 GOWORK=off modernize -fix ./...
 GOWORK=off golangci-lint run --fix ./...  # re-run without --fix if it changed files
 GOWORK=off go test ./...                  # -short skips the gorelease-backed tests
+GOWORK=off go tool govulncheck ./...
 ```

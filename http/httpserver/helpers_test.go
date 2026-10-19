@@ -208,11 +208,17 @@ var ok = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 	_, _ = io.WriteString(w, "ok")
 })
 
-// build builds a server for cfg through a Provider logging to logger.
-func build(t *testing.T, cfg httpserver.Config, h http.Handler, logger *slog.Logger) *httpserver.Server {
+// build builds a server for cfg through a Provider logging to logger, with opts.
+func build(
+	t *testing.T,
+	cfg httpserver.Config,
+	h http.Handler,
+	logger *slog.Logger,
+	opts ...httpserver.Option,
+) *httpserver.Server {
 	t.Helper()
 
-	s, err := httpserver.NewProvider(httpserver.ProviderParams{Logger: logger})(cfg, h)
+	s, err := httpserver.NewProvider(httpserver.ProviderParams{Logger: logger})(cfg, h, opts...)
 	require.NoError(t, err)
 
 	return s

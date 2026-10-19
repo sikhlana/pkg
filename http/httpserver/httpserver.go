@@ -62,8 +62,25 @@ type Server struct {
 // Provider builds a Server from a Config and the handler it serves. The Config is validated, and with TLS enabled
 // its key pair, and any client CAs, are read once to build the TLS configuration, which then re-reads them as they
 // rotate; a pair that can't be loaded fails the build. It returns ErrNilHandler for a nil handler. The Server it
-// returns is inert until Listen is called.
-type Provider func(cfg Config, handler http.Handler) (*Server, error)
+// returns is inert until Listen is called. opts set per-build settings, such as WithName; a decoration of a Provider
+// passes them on to keep them.
+type Provider func(cfg Config, handler http.Handler, opts ...Option) (*Server, error)
+
+// Option sets a per-build setting of a Provider.
+type Option func(*options)
+
+// options holds the settings a Provider's Options set for one build.
+type options struct {
+	name string
+}
+
+// WithName names the server: every record it logs carries the name as the server attribute, net/http's error reports
+// and tlsconfig's key pair records included. An empty name adds nothing.
+func WithName(name string) Option {
+	return func(o *options) {
+		o.name = name
+	}
+}
 
 // ProviderParams is NewProvider's input.
 type ProviderParams struct {
@@ -76,15 +93,27 @@ type ProviderParams struct {
 
 // NewProvider returns a Provider whose servers log through p.Logger.
 func NewProvider(p ProviderParams) Provider {
-	logger := p.Logger
+	base := p.Logger
 
-	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
+	if base == nil {
+		base = slog.New(slog.DiscardHandler)
 	}
 
-	return func(cfg Config, handler http.Handler) (*Server, error) {
+	return func(cfg Config, handler http.Handler, opts ...Option) (*Server, error) {
 		if handler == nil {
 			return nil, ErrNilHandler
+		}
+
+		var o options
+
+		for _, opt := range opts {
+			opt(&o)
+		}
+
+		logger := base
+
+		if o.name != "" {
+			logger = logger.With(slog.String("server", o.name))
 		}
 
 		if err := configvalidator.Validate(&cfg); err != nil {

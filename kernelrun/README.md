@@ -22,7 +22,7 @@ None. The start and stop timeouts are developer settings, passed to `Run` in `Op
 | Runner.Func | The runner's body. Never nil. |
 | RunnerGroup | The fx group tag Run collects Runners from. |
 | WithRunner | Registers a Func value under a name. |
-| ProvideRunner | Registers the Func a constructor builds from the graph under a name. The constructor's first result must have the Func type. |
+| ProvideRunner | Registers the Func a constructor builds from the graph under a name. The constructor's first result must have the Func type. Further fx annotations are applied to the constructor after ProvideRunner's own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency; one that tags or converts the result fails startup. |
 | ErrNoRunners | Returned by Run, before any OnStart hook, for an app with no runners. |
 | ErrDuplicateRunner | Returned by Run, before any OnStart hook, for two runners with one name. |
 | ErrInvalidRunner | Returned by Run, before any OnStart hook, for a runner with an empty name or a nil Func. |
@@ -83,16 +83,45 @@ When the graph holds a `*slog.Logger`, `Run` logs crashes (with a panic's stack)
 A loop module splits its work across the lifecycle. It prepares in OnStart, so a setup failure is a startup failure and a finished `Start` means ready; it serves in its runner until the runner's context is cancelled; and it releases in OnStop what OnStart acquired. Its own `ProvideRunner` registers through `kernelrun.ProvideRunner`:
 
 ```go
-// runner.go in a server module.
+// runner.go in a module with one server per app.
 
-const DefaultRunnerName = "httpserver"
+const DefaultRunnerName = "apiserver"
+
+type RunnerParams struct {
+	fx.In
+
+	Lifecycle fx.Lifecycle
+	Server    *Server
+}
 
 func ProvideRunner() fx.Option {
-	return kernelrun.ProvideRunner(DefaultRunnerName, func(s *Server) kernelrun.Func {
-		return s.Serve
+	return kernelrun.ProvideRunner(DefaultRunnerName, func(p RunnerParams) kernelrun.Func {
+		p.Lifecycle.Append(fx.Hook{
+			OnStart: p.Server.Listen,
+			OnStop:  func(context.Context) error { return p.Server.Close() },
+		})
+
+		return p.Server.Serve
 	})
 }
 ```
+
+A module whose loops are named instances takes the name instead, `ProvideRunner(name)`, and registers the runner as `<module>:<name>`. Its constructor needs the instance provided under that name's tag, which a struct tag can't spell since the name is only known at wiring time, so it passes `fx.ParamTags` after the constructor, and `ProvideRunner` applies them:
+
+```go
+func ProvideRunner(name string) fx.Option {
+	return kernelrun.ProvideRunner("apiserver:"+name, func(lc fx.Lifecycle, s *Server) kernelrun.Func {
+		lc.Append(fx.Hook{
+			OnStart: s.Listen,
+			OnStop:  func(context.Context) error { return s.Close() },
+		})
+
+		return s.Serve
+	}, fx.ParamTags("", NameTag(name)))
+}
+```
+
+`http/httpserver`'s `ProvideRunner` works this way.
 
 ```go
 // Server binds its listener in an OnStart hook, serves on it here and closes it in an OnStop hook.

@@ -62,3 +62,29 @@ func TestProvideRunnerTwiceInOneApp(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"api", "worker"}, []string{<-ran, <-ran})
 }
+
+func TestProvideRunnerForwardsAnnotations(t *testing.T) {
+	var got string
+
+	err := run(t, kernelrun.Options{},
+		fx.Supply(fx.Annotate("hello", fx.ResultTags(`name:"greeting"`))),
+		kernelrun.ProvideRunner("api", func(s string) kernelrun.Func {
+			return func(context.Context) error {
+				got = s
+
+				return nil
+			}
+		}, fx.ParamTags(`name:"greeting"`)),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, "hello", got)
+}
+
+func TestProvideRunnerRejectsARepeatedResultTag(t *testing.T) {
+	err := run(t, kernelrun.Options{},
+		kernelrun.ProvideRunner("api", func() kernelrun.Func { return returnNil }, fx.ResultTags(`name:"mine"`)),
+	)
+
+	require.Error(t, err)
+}

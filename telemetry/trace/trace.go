@@ -74,10 +74,10 @@ type Params struct {
 	Config Config `optional:"true"`
 
 	// Exporter builds the span exporter. Without one, spans go over OTLP HTTP.
-	Exporter Exporter `name:"telemetry/trace:exporter:wired" optional:"true"`
+	Exporter Exporter `name:"telemetry/trace:exporter::wired" optional:"true"`
 
 	// Supplied replaces the provider New would build. New returns it unchanged and never shuts it down.
-	Supplied oteltrace.TracerProvider `name:"telemetry/trace:provider:supplied" optional:"true"`
+	Supplied oteltrace.TracerProvider `name:"telemetry/trace:provider::supplied" optional:"true"`
 }
 
 // New returns the app's tracer provider. With Supplied, it returns that, logging a warning when the endpoint or the

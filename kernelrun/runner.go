@@ -37,10 +37,16 @@ func WithRunner(name string, f Func) fx.Option {
 }
 
 // ProvideRunner registers the Func that constructor builds from the graph as the runner name. The constructor can
-// take any parameters fx can supply, and its first result must have the Func type.
-func ProvideRunner(name string, constructor any) fx.Option {
-	return fx.Module("kernelrun",
-		fx.Provide(fx.Private, fx.Annotate(constructor, fx.ResultTags(builtRunner))),
+// take any parameters fx can supply, and its first result must have the Func type. anns are applied to constructor
+// after ProvideRunner's own result tag, for its inputs and hooks: fx.ParamTags to take a tagged dependency, fx.From,
+// fx.OnStart, fx.OnStop. One that tags or converts the result conflicts with ProvideRunner's and fails startup.
+func ProvideRunner(name string, constructor any, anns ...fx.Annotation) fx.Option {
+	return fx.Module(
+		"kernelrun",
+		fx.Provide(
+			fx.Private,
+			fx.Annotate(constructor, append([]fx.Annotation{fx.ResultTags(builtRunner)}, anns...)...),
+		),
 		fx.Provide(fx.Annotate(
 			func(p builtParams) Runner {
 				return Runner{Name: name, Func: p.Func}

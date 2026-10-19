@@ -22,7 +22,7 @@ None. The start and stop timeouts are developer settings, passed to `Run` in `Op
 | Runner.Func | The runner's body. Never nil. |
 | RunnerGroup | The fx group tag Run collects Runners from. |
 | WithRunner | Registers a Func value under a name. |
-| ProvideRunner | Registers the Func a constructor builds from the graph under a name. The constructor's first result must have the Func type. |
+| ProvideRunner | Registers the Func a constructor builds from the graph under a name. The constructor's first result must have the Func type. Further fx annotations are applied to the constructor after ProvideRunner's own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency; one that tags or converts the result fails startup. |
 | ErrNoRunners | Returned by Run, before any OnStart hook, for an app with no runners. |
 | ErrDuplicateRunner | Returned by Run, before any OnStart hook, for two runners with one name. |
 | ErrInvalidRunner | Returned by Run, before any OnStart hook, for a runner with an empty name or a nil Func. |
@@ -106,7 +106,22 @@ func ProvideRunner() fx.Option {
 }
 ```
 
-A module whose loops are named instances takes the name instead, `ProvideRunner(name)`, and registers the runner as `<module>:<name>`. `http/httpserver`'s `ProvideRunner` does, injecting the server provided under that name.
+A module whose loops are named instances takes the name instead, `ProvideRunner(name)`, and registers the runner as `<module>:<name>`. Its constructor needs the instance provided under that name's tag, which a struct tag can't spell since the name is only known at wiring time, so it passes `fx.ParamTags` after the constructor, and `ProvideRunner` applies them:
+
+```go
+func ProvideRunner(name string) fx.Option {
+	return kernelrun.ProvideRunner("apiserver:"+name, func(lc fx.Lifecycle, s *Server) kernelrun.Func {
+		lc.Append(fx.Hook{
+			OnStart: s.Listen,
+			OnStop:  func(context.Context) error { return s.Close() },
+		})
+
+		return s.Serve
+	}, fx.ParamTags("", NameTag(name)))
+}
+```
+
+`http/httpserver`'s `ProvideRunner` works this way.
 
 ```go
 // Server binds its listener in an OnStart hook, serves on it here and closes it in an OnStop hook.

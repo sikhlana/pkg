@@ -83,12 +83,16 @@ When the graph holds a `*slog.Logger`, `Run` logs crashes (with a panic's stack)
 A loop module splits its work across the lifecycle. It prepares in OnStart, so a setup failure is a startup failure and a finished `Start` means ready; it serves in its runner until the runner's context is cancelled; and it releases in OnStop what OnStart acquired. Its own `ProvideRunner` registers through `kernelrun.ProvideRunner`:
 
 ```go
-// runner.go in a server module.
+// runner.go in a server module. Its servers are named instances, so ProvideRunner takes the name and registers the
+// runner as httpserver:<name>; http/httpserver's runner.go shows how it injects the server provided under that name.
 
-const DefaultRunnerName = "httpserver"
+func ProvideRunner(name string) fx.Option {
+	return kernelrun.ProvideRunner("httpserver:"+name, func(lc fx.Lifecycle, s namedServer) kernelrun.Func {
+		lc.Append(fx.Hook{
+			OnStart: s.Listen,
+			OnStop:  func(context.Context) error { return s.Close() },
+		})
 
-func ProvideRunner() fx.Option {
-	return kernelrun.ProvideRunner(DefaultRunnerName, func(s *Server) kernelrun.Func {
 		return s.Serve
 	})
 }

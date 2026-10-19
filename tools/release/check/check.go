@@ -5,17 +5,20 @@ package check
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 
 	"github.com/sikhlana/pkg/tools/release/git"
 	"github.com/sikhlana/pkg/tools/release/gorelease"
+	"github.com/sikhlana/pkg/tools/release/parallel"
 	"github.com/sikhlana/pkg/tools/release/plan"
 	"github.com/sikhlana/pkg/tools/release/report"
 	"github.com/sikhlana/pkg/tools/release/version"
@@ -31,9 +34,11 @@ type Options struct {
 	// Base is the pull request's base branch, such as origin/main.
 	Base string
 	// Gorelease returns the gorelease runner. Run calls it at most once,
-	// when the first module needs an API comparison. Nil skips the
-	// comparison.
+	// when the first module needs an API comparison, with Run's context,
+	// and every module shares its result. Nil skips the comparison.
 	Gorelease func(context.Context) (gorelease.Runner, error)
+	// Jobs is how many modules Run checks at once. Zero means 1.
+	Jobs int
 }
 
 // Module is the outcome for one changed library module.
@@ -70,7 +75,9 @@ type Report struct {
 
 // Run checks the pull request whose head opts.Repo has checked out against
 // opts.Base. A broken rule is a Problem in the Report, not an error; an
-// error means the check couldn't run.
+// error means the check couldn't run. Run checks every changed module, up
+// to opts.Jobs at once, even after one couldn't be checked, and returns
+// every such module's error joined.
 func Run(ctx context.Context, opts Options) (Report, error) {
 	change, err := plan.Diff(ctx, opts.Repo, opts.Base)
 	if err != nil {
@@ -78,12 +85,31 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	}
 
 	c := checker{opts: opts}
+
+	if opts.Gorelease != nil {
+		c.gorelease = sync.OnceValues(func() (gorelease.Runner, error) {
+			return opts.Gorelease(ctx)
+		})
+	}
+
+	modules := plan.Changed(opts.Workspace, change)
+	results := parallel.Map(ctx, opts.Jobs, modules, c.check)
 	r := Report{Base: opts.Base, Problems: opts.Workspace.Check()}
 
-	for _, m := range plan.Changed(opts.Workspace, change) {
-		if err = c.add(ctx, &r, m); err != nil {
-			return Report{}, fmt.Errorf("checking %s: %w", m.Dir, err)
+	var errs []error
+
+	for i, res := range results {
+		if res.Err != nil {
+			errs = append(errs, fmt.Errorf("checking %s: %w", modules[i].Dir, res.Err))
+			continue
 		}
+
+		r.Modules = append(r.Modules, res.Value.module)
+		r.Problems = append(r.Problems, res.Value.problems...)
+	}
+
+	if len(errs) > 0 {
+		return Report{}, errors.Join(errs...)
 	}
 
 	return r, nil
@@ -189,22 +215,23 @@ func (m Module) base() string {
 	}
 }
 
+// checker is safe for concurrent use once Run has set it up.
 type checker struct {
-	opts   Options
-	runner *gorelease.Runner
+	opts Options
+	// gorelease builds the runner once; nil skips the API comparison.
+	gorelease func() (gorelease.Runner, error)
 }
 
-// add checks m and adds its outcome and problems to r.
-func (c *checker) add(ctx context.Context, r *Report, m workspace.Module) error {
+// checked is one module's check: its result and the rules it broke.
+type checked struct {
+	module   Module
+	problems []report.Problem
+}
+
+func (c *checker) check(ctx context.Context, m workspace.Module) (checked, error) {
 	result, problems, err := c.module(ctx, m)
-	if err != nil {
-		return err
-	}
 
-	r.Modules = append(r.Modules, result)
-	r.Problems = append(r.Problems, problems...)
-
-	return nil
+	return checked{module: result, problems: problems}, err
 }
 
 func (c *checker) module(ctx context.Context, m workspace.Module) (Module, []report.Problem, error) {
@@ -364,7 +391,7 @@ func (c *checker) apiMinimum(
 	v, released string,
 	result *Module,
 ) ([]report.Problem, error) {
-	if c.opts.Gorelease == nil {
+	if c.gorelease == nil {
 		return nil, nil
 	}
 
@@ -374,7 +401,7 @@ func (c *checker) apiMinimum(
 		base, since = released, " since "+released
 	}
 
-	runner, err := c.gorelease(ctx)
+	runner, err := c.gorelease()
 	if err != nil {
 		return nil, err
 	}
@@ -410,19 +437,6 @@ func (c *checker) apiMinimum(
 	}
 
 	return []report.Problem{p}, nil
-}
-
-func (c *checker) gorelease(ctx context.Context) (gorelease.Runner, error) {
-	if c.runner == nil {
-		runner, err := c.opts.Gorelease(ctx)
-		if err != nil {
-			return gorelease.Runner{}, err
-		}
-
-		c.runner = &runner
-	}
-
-	return *c.runner, nil
 }
 
 func problem(m workspace.Module, file, message string) report.Problem {

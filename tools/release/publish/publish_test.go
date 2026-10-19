@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/sikhlana/pkg/tools/release/fixture"
 	"github.com/sikhlana/pkg/tools/release/git"
+	"github.com/sikhlana/pkg/tools/release/parallel"
 	"github.com/sikhlana/pkg/tools/release/publish"
 	"github.com/sikhlana/pkg/tools/release/workspace"
 )
@@ -76,7 +79,14 @@ func run(
 	ws, err := workspace.Load(f.Root)
 	require.NoError(t, err)
 
-	return publish.Run(t.Context(), publish.Options{Repo: repo, Workspace: ws, SHA: sha, Releases: releases, Proxy: p})
+	return publish.Run(t.Context(), publish.Options{
+		Repo:      repo,
+		Workspace: ws,
+		SHA:       sha,
+		Releases:  releases,
+		Proxy:     p,
+		Jobs:      4,
+	})
 }
 
 func TestOneModuleBumped(t *testing.T) {
@@ -360,10 +370,10 @@ func TestMajorVersionDirectoryRelease(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "logger/v2.0.0", outcomes[1].Tag)
-	assert.Equal(t, []string{
+	assert.ElementsMatch(t, []string{
 		"/github.com/release-fixture/pkg/logger/@v/v0.3.1.info",
 		"/github.com/release-fixture/pkg/logger/v2/@v/v2.0.0.info",
-	}, p.paths)
+	}, p.paths, "announcements run concurrently, in any order")
 }
 
 func TestLaterMajorDoesntBecomeThePreviousRelease(t *testing.T) {
@@ -414,4 +424,196 @@ func TestSkippedVersionIsReported(t *testing.T) {
 		outcomes[0].SkippedWarning())
 	assert.Contains(t, publish.Markdown(outcomes), "| logger | logger/v0.5.0 | created; never released: v0.4.0 |")
 	assert.Empty(t, outcomes[1].SkippedWarning())
+}
+
+func TestReleasesAreCreatedOneAtATimeInModuleOrder(t *testing.T) {
+	f := setup(t)
+	f.AddModule("cache", "0.1.0")
+	f.Write("logger/VERSION", "0.3.1\n")
+	f.Write("metrics/VERSION", "0.1.1\n")
+	sha := f.Commit("Bump")
+
+	var (
+		guard   serialGuard
+		mu      sync.Mutex
+		created []string
+	)
+
+	releases := NewMockReleases(gomock.NewController(t))
+	releases.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil).Times(3)
+	releases.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, r publish.Release) error {
+			defer guard.enter()()
+
+			mu.Lock()
+
+			created = append(created, r.Tag)
+			mu.Unlock()
+
+			return nil
+		}).Times(3)
+
+	p := &proxy{}
+
+	_, err := run(t, f, sha, releases, p.serve(t))
+	require.NoError(t, err)
+
+	assert.False(t, guard.overlapped.Load(), "two releases were created at once")
+	assert.Equal(t, []string{"cache/v0.1.0", "logger/v0.3.1", "metrics/v0.1.1"}, created)
+}
+
+func TestAnnouncementsFollowEveryCreate(t *testing.T) {
+	f := setup(t)
+	f.Write("logger/VERSION", "0.3.1\n")
+	f.Write("metrics/VERSION", "0.1.1\n")
+	sha := f.Commit("Bump both")
+
+	metricsCreated := make(chan struct{})
+
+	releases := NewMockReleases(gomock.NewController(t))
+	releases.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
+	releases.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, r publish.Release) error {
+			if r.Tag == "metrics/v0.1.1" {
+				close(metricsCreated)
+			}
+
+			return nil
+		}).Times(2)
+
+	// An announcement arriving before metrics' release exists, the last to be
+	// created, fails.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case <-metricsCreated:
+		default:
+			http.Error(w, "announced before every release was created", http.StatusConflict)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	outcomes, err := run(t, f, sha, releases, publish.Proxy{URL: srv.URL, Client: srv.Client()})
+	require.NoError(t, err)
+
+	require.Len(t, outcomes, 2)
+	assert.NoError(t, outcomes[0].ProxyErr)
+	assert.NoError(t, outcomes[1].ProxyErr)
+}
+
+func TestLookupsRunOneAtATimeInModuleOrder(t *testing.T) {
+	f := setup(t)
+	f.AddModule("cache", "0.1.0")
+	sha := f.Commit("Add cache")
+
+	var (
+		guard  serialGuard
+		mu     sync.Mutex
+		looked []string
+	)
+
+	releases := NewMockReleases(gomock.NewController(t))
+	releases.EXPECT().Exists(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, tag string) (bool, error) {
+			defer guard.enter()()
+
+			mu.Lock()
+
+			looked = append(looked, tag)
+			mu.Unlock()
+
+			return true, nil
+		}).Times(3)
+
+	_, err := run(t, f, sha, releases, (&proxy{}).serve(t))
+	require.NoError(t, err)
+
+	assert.False(t, guard.overlapped.Load(), "two lookups ran at once")
+	assert.Equal(t, []string{"cache/v0.1.0", "logger/v0.3.0", "metrics/v0.1.0"}, looked)
+}
+
+func TestCancelledAnnouncementIsOnlyAWarning(t *testing.T) {
+	f := setup(t)
+	f.Write("logger/VERSION", "0.3.1\n")
+	f.Write("metrics/VERSION", "0.1.1\n")
+	sha := f.Commit("Bump both")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	releases := NewMockReleases(gomock.NewController(t))
+	releases.EXPECT().Exists(gomock.Any(), gomock.Any()).Return(false, nil).Times(2)
+	releases.EXPECT().Create(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, publish.Release) error {
+			// The release exists; the run is interrupted before announcing it.
+			cancel()
+
+			return nil
+		}).Times(2)
+
+	repo, err := git.Open(t.Context(), f.Root)
+	require.NoError(t, err)
+
+	ws, err := workspace.Load(f.Root)
+	require.NoError(t, err)
+
+	outcomes, err := publish.Run(ctx, publish.Options{
+		Repo:      repo,
+		Workspace: ws,
+		SHA:       sha,
+		Releases:  releases,
+		Proxy:     (&proxy{}).serve(t),
+		Jobs:      4,
+	})
+
+	// The missing announcements are warnings, but the interruption itself fails the run.
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorContains(t, err, "publishing interrupted")
+	require.Len(t, outcomes, 2)
+
+	// ctx ended before announcing began, so no announcement ran.
+	assert.Equal(t, publish.StatusCreated, outcomes[0].Status)
+	require.ErrorIs(t, outcomes[0].ProxyErr, parallel.ErrNotRun)
+	require.ErrorContains(t, outcomes[0].ProxyErr, "announcing "+fixture.ModulePrefix+"/logger@v0.3.1: not run")
+	assert.Equal(t, publish.StatusCreated, outcomes[1].Status)
+	require.ErrorIs(t, outcomes[1].ProxyErr, parallel.ErrNotRun)
+	require.ErrorContains(t, outcomes[1].ProxyErr, "announcing "+fixture.ModulePrefix+"/metrics@v0.1.1: not run")
+}
+
+// serialGuard records whether two calls overlap. A call holds the guard for a
+// moment, so a call made concurrently finds it taken rather than slipping
+// through between two quick calls.
+type serialGuard struct {
+	held       atomic.Bool
+	overlapped atomic.Bool
+}
+
+// enter takes the guard, noting an overlap when it's already held, and
+// returns the function that releases it.
+func (g *serialGuard) enter() func() {
+	if !g.held.CompareAndSwap(false, true) {
+		g.overlapped.Store(true)
+
+		return func() {}
+	}
+
+	// Long enough for a concurrent call to arrive; serial calls only pay it
+	// once each.
+	time.Sleep(20 * time.Millisecond)
+
+	return func() { g.held.Store(false) }
+}
+
+func TestSerialGuardCatchesOverlap(t *testing.T) {
+	var (
+		guard serialGuard
+		wg    sync.WaitGroup
+	)
+
+	for range 2 {
+		wg.Go(func() { defer guard.enter()() })
+	}
+
+	wg.Wait()
+
+	assert.True(t, guard.overlapped.Load(), "two concurrent calls went unnoticed")
 }

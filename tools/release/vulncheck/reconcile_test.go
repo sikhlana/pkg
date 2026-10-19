@@ -198,6 +198,7 @@ func TestRunScanErrorLeavesTheTrackerUntouched(t *testing.T) {
 	tracker := NewMockTracker(gomock.NewController(t))
 
 	results, _, err := vulncheck.Run(t.Context(), vulncheck.Options{
+		Jobs:      4,
 		Workspace: workspaceOf(t, "cli", "kernel"),
 		Run:       runs(map[string][]byte{"cli": nil}),
 		Tracker:   tracker,
@@ -214,6 +215,7 @@ func TestRunReconciles(t *testing.T) {
 	tracker.EXPECT().Find(gomock.Any(), vulncheck.Label).Return(vulncheck.Issue{}, false, nil)
 
 	results, outcome, err := vulncheck.Run(t.Context(), vulncheck.Options{
+		Jobs:      4,
 		Workspace: workspaceOf(t, "cli"),
 		Run:       runs(map[string][]byte{"cli": nil}),
 		Tracker:   tracker,
@@ -226,6 +228,7 @@ func TestRunReconciles(t *testing.T) {
 
 func TestRunWithoutATrackerOnlyScans(t *testing.T) {
 	results, outcome, err := vulncheck.Run(t.Context(), vulncheck.Options{
+		Jobs:      4,
 		Workspace: workspaceOf(t, "cli"),
 		Run:       runs(map[string][]byte{"cli": recorded(t)}),
 	})

@@ -16,6 +16,8 @@ type Options struct {
 	Tracker Tracker
 	// RunURL is linked from the closing comment, as RunURL returns it.
 	RunURL string
+	// Jobs is how many directories Run scans at once. Zero means 1.
+	Jobs int
 }
 
 // Run scans every directory and, unless opts.Tracker is nil, reconciles the
@@ -29,7 +31,7 @@ func Run(ctx context.Context, opts Options) ([]Result, Outcome, error) {
 		return nil, Outcome{}, err
 	}
 
-	results, err := Scan(ctx, opts.Workspace.Root, dirs, opts.Run)
+	results, err := Scan(ctx, opts.Workspace.Root, dirs, opts.Jobs, opts.Run)
 	if err != nil {
 		return results, Outcome{}, err
 	}

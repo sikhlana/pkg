@@ -51,6 +51,7 @@ func runAPI(t *testing.T, f fixture.Repo, runner gorelease.Runner) check.Report 
 		Workspace: ws,
 		Base:      "main",
 		Gorelease: func(context.Context) (gorelease.Runner, error) { return runner, nil },
+		Jobs:      4,
 	})
 	require.NoError(t, err)
 

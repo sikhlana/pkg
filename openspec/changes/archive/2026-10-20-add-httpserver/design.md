@@ -204,3 +204,17 @@ The README's With fx example now shows a module that owns its server, with a Con
 ## Migration Plan
 
 One pull request. `tls/tlsconfig`, `kernelrun` and `config/configvalidator` are already released, so `http/httpserver` requires their published versions and merging publishes `http/httpserver/v0.1.0`, plus patch releases of `kernel` and `kernelrun` for their README examples. No consumer exists yet.
+
+## What happened
+
+- **Shipped in two pull requests, not one.** The second review's forwarded annotations needed a kernelrun release first, so the work on one branch was replayed by cherry-pick onto two branches off `main`: `forward-fx-annotations` (#27: kernelrun 0.3.0, log 0.1.1, telemetry 0.1.1, and the constitution) and this change (#28: http/httpserver 0.1.0, kernel 0.3.1), whose `go.mod` then required the published kernelrun v0.3.0. The Migration Plan's single pull request didn't survive.
+- **Constitution amendments moved.** Decision 10's named-instance and per-name-group rules, and the action-segment, instance-name and positional-parameter rules from the second review, landed with `forward-fx-annotations` so the constitution changed in one tier.
+- **Deviations from the design:** separate `host` and `port` instead of one `address` (decision 8); `Chain` builds positions as pointer types so `next` has an identity; nil middleware is left out rather than failing startup (second review); `DefaultReadHeaderTimeout` is 5s, not 1s; the runner goes through `kernelrun.ProvideRunner` with forwarded `fx.ParamTags` instead of the `runnerServer` adapter.
+- **Fixes made in review** are in the two Fixes sections above.
+- **Rolled into `docs/http.md`:** decisions 3, 6 and 7, plus leaving middleware out, the shutdown-timeout verdict, the named Provider, and the TLS handshake timeout.
+- **Follow-ups left open:**
+  - A decoration of the app's `Provider` doesn't reach servers built through `ProvideServer`, which hands its constructor a Provider of its own. Letting the Provider take its logger per call would remove the caveat; it's an API change, so it waits for a need.
+  - The drain race fix (a listener failure while the context ends) has no test; the race can't be forced from outside.
+  - A config that forgets `port` listens on a random one rather than failing.
+  - `config/configloader` is a test-only requirement, so viper appears in consumers' module graphs, not their builds.
+  - govulncheck reports GO-2026-5932 (golang.org/x/crypto/openpgp) at module level only, through configvalidator; no code calls it.

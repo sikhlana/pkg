@@ -2,7 +2,7 @@
 
 No mocked interface changes, so there's no go generate task.
 
-- [x] 1.1 `httpserver.go`: `Option`, the unexported `options`, `WithName`; `Provider` and `NewProvider` taking `opts ...Option`, building with `logger.With(slog.String("server", name))` when a name is given, per design decision 2.
+- [x] 1.1 `httpserver.go` (now `provider.go` and `options.go`, task 5.1): `Option`, the unexported `options`, `WithName`; `Provider` and `NewProvider` taking `opts ...Option`, building with `logger.With(slog.String("server", name))` when a name is given, per design decision 2.
 - [x] 1.2 Tests: a server built by hand with `WithName` names itself on its listening record and on tlsconfig's key-pair record; without it, no `server` attribute.
 
 ## 2. Spec constructors
@@ -22,3 +22,13 @@ No mocked interface changes, so there's no go generate task.
 
 - [x] 4.1 In `http/httpserver`: `modernize -fix ./...`, `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), the full `go test ./...` and `go test -race ./...`, then `govulncheck ./...`.
 - [x] 4.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 4.1–4.2.
+
+## 5. File per idea
+
+Added during apply, on review: `httpserver.go` had grown to hold the server, the Provider and its options.
+
+- [x] 5.1 Split `httpserver.go` into `server.go`, `provider.go` and `options.go`, and its tests into `server_test.go` and `provider_test.go`.
+- [x] 5.2 Move `Spec`, `NameTag` and `ProvideServer` to `server.go`, and `MiddlewareGroup` and `ProvideMiddleware` to `middleware.go`; `module.go` keeps `Module`, the name check and the errors the helpers share.
+- [x] 5.3 `openspec/config.yaml`: the file-per-idea rule, and the module layout's `<idea>.go` line in place of `mymodule.go`.
+- [x] 5.4 Re-run 4.1 for `http/httpserver` and 4.2 across `go.work`.
+

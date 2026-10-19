@@ -335,13 +335,24 @@ context: |
     mymodule/
     ├── go.mod, VERSION, README.md    required
     ├── config.go                     when the module has a Config
-    ├── mymodule.go                   implementation
+    ├── <idea>.go                     one per principal idea, with
+    │                                 its ProvideX (server.go)
     ├── module.go                     Module, AsX/WithX helpers
     ├── runner.go                     when it owns a long-running loop
     └── *_test.go
     testing/mymoduletest/             optional consumer-facing doubles,
                                       a module of its own
 
+  - A package splits into one file per principal idea, named for it
+    (server.go, provider.go, options.go, middleware.go), so no file
+    collects unrelated types. An idea's fx helper lives with it:
+    ProvideX, and the tag helper and errors only it needs, go in x.go
+    (ProvideServer and NameTag in server.go, ProvideRunner in
+    runner.go). module.go holds the Module variable, the AsX/WithX
+    pairs, and wiring that spans ideas, such as a check the Module
+    runs and the errors it shares. A Params struct stays beside its
+    constructor. <package>.go exists only when the package has a
+    single idea, or to carry the package doc.
   - A nested module lives at <group>/<group><name> (config/configloader,
     http/httpserver), and its package name equals its directory name.
     Outside the filesystem path and the tag, which the go command

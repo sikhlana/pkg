@@ -86,6 +86,10 @@ Decisions 1–3 into `docs/http.md`, replacing "Every record names its server"'s
 
 Brought forward during apply (task 3.4): that section described the decorator this change removes, so it would have been wrong once merged. It's now "The module builds every server itself", and the private-tag example in "Checking names without building anything" reads `httpserver:spec::built`. Archive still checks the page against what shipped.
 
+### 5. One file per idea (added during apply)
+
+Review found `httpserver.go` crowded once the Provider gained options, so the package now splits by idea: `server.go` (the Server, `Spec`, `NameTag`, `ProvideServer`), `provider.go` (`Provider`, `ProviderParams`, `NewProvider`, `ErrNilHandler`), `options.go` (`Option`, `WithName`), `middleware.go` (gaining `MiddlewareGroup` and `ProvideMiddleware`) and `runner.go`. `module.go` keeps `Module`, the name check and the errors shared across helpers. An idea's `ProvideX` lives with the idea rather than in `module.go`, and a Params struct stays beside its constructor; the constitution gains the rule. No exported API changes. Other modules aren't restructured here: a scan found `log/log.go` (`Format` alongside `New`), `telemetry/trace/trace.go` (the exporters alongside `New`), `telemetry/telemetry.go` (resource and propagator, borderline) and log's `ProvideMiddleware` in `module.go` out of line with the rule, left for a follow-up pull request.
+
 ## Risks / Trade-offs
 
 - [The breaking change] → httpserver is at 0.1.0 with no known consumer; a minor bump with `!`.

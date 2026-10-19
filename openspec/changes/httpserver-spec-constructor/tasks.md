@@ -20,5 +20,5 @@ No mocked interface changes, so there's no go generate task.
 
 ## 4. Verification
 
-- [ ] 4.1 In `http/httpserver`: `modernize -fix ./...`, `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), the full `go test ./...` and `go test -race ./...`, then `govulncheck ./...`.
-- [ ] 4.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 4.1–4.2.
+- [x] 4.1 In `http/httpserver`: `modernize -fix ./...`, `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), the full `go test ./...` and `go test -race ./...`, then `govulncheck ./...`.
+- [x] 4.2 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 4.1–4.2.

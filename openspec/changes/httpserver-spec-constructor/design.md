@@ -84,6 +84,8 @@ Applying the middleware to `Spec.Handler` before calling the Provider means the 
 
 Decisions 1–3 into `docs/http.md`, replacing "Every record names its server"'s caveat with why the module calls the Provider itself.
 
+Brought forward during apply (task 3.4): that section described the decorator this change removes, so it would have been wrong once merged. It's now "The module builds every server itself", and the private-tag example in "Checking names without building anything" reads `httpserver:spec::built`. Archive still checks the page against what shipped.
+
 ## Risks / Trade-offs
 
 - [The breaking change] → httpserver is at 0.1.0 with no known consumer; a minor bump with `!`.

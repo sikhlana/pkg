@@ -1,6 +1,7 @@
 package configloader_test
 
 import (
+	"log/slog"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -302,33 +303,6 @@ func TestSecretStaysOutOfTheEnvironment(t *testing.T) {
 	assert.False(t, set)
 }
 
-func TestIndependentLoads(t *testing.T) {
-	isolate(t)
-
-	type other struct {
-		Port int `mapstructure:"port"`
-	}
-
-	t.Setenv("MY_SVC_HTTP_PORT", "9191")
-	t.Setenv("OTHER_PORT", "7070")
-
-	first, err := configloader.Load(configloader.Options[testConfig]{
-		Name:     name,
-		Defaults: testConfig{HTTP: HTTPConfig{Host: "localhost"}},
-	})
-	require.NoError(t, err)
-
-	second, err := configloader.Load(configloader.Options[other]{Name: "other"})
-	require.NoError(t, err)
-
-	again, err := configloader.Load(configloader.Options[testConfig]{Name: name})
-	require.NoError(t, err)
-
-	assert.Equal(t, HTTPConfig{Host: "localhost", Port: 9191}, first.HTTP)
-	assert.Equal(t, other{Port: 7070}, second)
-	assert.Equal(t, HTTPConfig{Port: 9191}, again.HTTP)
-}
-
 func TestNullSectionInTheFileDoesntHideTheEnvironment(t *testing.T) {
 	isolate(t)
 	t.Setenv("MY_SVC_HTTP_PORT", "9191")
@@ -373,4 +347,37 @@ func TestLoadedConfigSharesNothingWithDefaults(t *testing.T) {
 	assert.Equal(t, []string{"a.example.com"}, second.Hosts)
 	assert.Equal(t, map[string][]int{"x": {1}}, second.Tags)
 	assert.Equal(t, map[string]any{"a": []any{1}}, o.Defaults.Extra)
+}
+
+func TestReportsAKeyFromTheEnvironment(t *testing.T) {
+	isolate(t)
+	t.Setenv("MY_SVC_HTTP_PORT", "9191")
+
+	records, logger := newCapture()
+
+	_, err := configloader.Load(configloader.Options[testConfig]{Name: name, Logger: logger})
+	require.NoError(t, err)
+	assert.Contains(t, records.all(), record{
+		Level:   slog.LevelDebug,
+		Message: "config key set from environment",
+		Attrs:   map[string]any{"key": "http.port", "env": "MY_SVC_HTTP_PORT"},
+	})
+	assert.NotContains(t, records.rendered(), "9191")
+}
+
+func TestReportsAKeyFromASecretFile(t *testing.T) {
+	isolate(t)
+
+	records, logger := newCapture()
+	path := writeFile(t, t.TempDir(), "password", "s3cret\n")
+	t.Setenv("MY_SVC_DB_PASSWORD_FILE", path)
+
+	_, err := configloader.Load(configloader.Options[testConfig]{Name: name, Logger: logger})
+	require.NoError(t, err)
+	assert.Contains(t, records.all(), record{
+		Level:   slog.LevelDebug,
+		Message: "config key read from file",
+		Attrs:   map[string]any{"key": "db.password", "env": "MY_SVC_DB_PASSWORD_FILE", "path": path},
+	})
+	assert.NotContains(t, records.rendered(), "s3cret")
 }

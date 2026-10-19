@@ -18,10 +18,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// ErrMalformedFile is returned when the config file can't be parsed. The error names the file, its format and, where
-// the parser reports one, the position, but never the parser's message, which can quote the file's contents.
-var ErrMalformedFile = errors.New("malformed config file")
-
 // lineNumber finds the line a parser's message names, as YAML's "yaml: line 2: ..." does. Only the digits are kept.
 var lineNumber = regexp.MustCompile(`\bline (\d+)\b`)
 

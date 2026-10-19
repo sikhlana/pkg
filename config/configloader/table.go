@@ -2,7 +2,6 @@ package configloader
 
 import (
 	"encoding"
-	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -17,16 +16,6 @@ import (
 const fileSuffix = "_FILE"
 
 var textMarshaler = reflect.TypeFor[encoding.TextMarshaler]()
-
-var (
-	// ErrEnvNameCollision is returned when two keys would share an env name, or one key's env name is another's
-	// _FILE name. The error names both keys and the name.
-	ErrEnvNameCollision = errors.New("env name collision")
-
-	// ErrUnknownKeys is returned when the config file sets keys that match no field and Options.AllowUnknownKeys
-	// isn't set. The error lists every such key in full, sorted.
-	ErrUnknownKeys = errors.New("unknown config keys")
-)
 
 // leaf is a key that holds a single value, with the env name it's read from.
 type leaf struct {

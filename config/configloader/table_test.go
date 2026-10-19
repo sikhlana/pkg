@@ -1,6 +1,7 @@
 package configloader_test
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -300,4 +301,33 @@ func TestDefaultEntryIsNamedByItsKeyNotItsDisplay(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "override.example.com", cfg.DBs["prod"].Host)
+}
+
+func TestReportsAnIgnoredUnknownKey(t *testing.T) {
+	isolate(t)
+
+	records, logger := newCapture()
+	path := configFile(t, "htpp:\n  port: 9090\n")
+
+	_, err := configloader.Load(configloader.Options[testConfig]{
+		Name:             name,
+		Filename:         path,
+		AllowUnknownKeys: true,
+		Logger:           logger,
+	})
+	require.NoError(t, err)
+	assert.Contains(t, records.all(), record{
+		Level:   slog.LevelWarn,
+		Message: "ignoring unknown config key",
+		Attrs:   map[string]any{"key": "htpp.port"},
+	})
+}
+
+func TestEnvNameOfANestedKey(t *testing.T) {
+	isolate(t)
+	t.Setenv("MY_SVC_HTTP_READ_TIMEOUT", "30s")
+
+	cfg, err := configloader.Load(configloader.Options[testConfig]{Name: name})
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Second, cfg.HTTP.ReadTimeout)
 }

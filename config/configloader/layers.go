@@ -1,7 +1,6 @@
 package configloader
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,16 +11,6 @@ import (
 
 // maxSecretSize is the largest file a _FILE variable may name, in bytes.
 const maxSecretSize = 1 << 20
-
-var (
-	// ErrEnvAndFileSet is returned when both a key's env variable and its _FILE variable are non-empty. The error
-	// names both variables.
-	ErrEnvAndFileSet = errors.New("env variable and its file variable both set")
-
-	// ErrSecretFileTooLarge is returned when a _FILE variable names a file larger than 1 MiB. The error names the
-	// variable and the path, never the contents.
-	ErrSecretFileTooLarge = errors.New("secret file too large")
-)
 
 // setDefaults sets every leaf's default that Options.Defaults reaches, one key at a time, so a higher layer replaces
 // a slice as a whole and map entries merge entry by entry. Each default is copied first, so the loaded config never

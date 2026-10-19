@@ -42,17 +42,6 @@ type runParams struct {
 	Logger  *slog.Logger `optional:"true"`
 }
 
-// panicError is the crash a runner's recovered panic becomes.
-type panicError struct {
-	value any
-	stack []byte
-}
-
-// Error returns "panic: " followed by the panic's value.
-func (e *panicError) Error() string {
-	return fmt.Sprintf("panic: %v", e.value)
-}
-
 // Run builds an fx app from opts, starts it, runs its runners until the first one returns, and stops it.
 //
 // Before starting the app, Run checks its runners: none fails with ErrNoRunners, a repeated name with

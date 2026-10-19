@@ -1,51 +1,29 @@
 package cli
 
 import (
-	"cmp"
-	"fmt"
+	"context"
+	"os"
 
 	"github.com/spf13/cobra"
 )
 
-// NewRootCommand returns a root command with the given name and short description. It adds no flags of its own:
-// beyond cobra's --help (-h) and --version (-v, which cobra drops when another flag takes v), every flag name and
-// letter stays free for the program. A failing command prints its error but never the usage text, flag errors
-// included; --help still prints help.
-// --version prints the root's display name and its Version, which starts as the ReadBuildInfo line.
-func NewRootCommand(name, short string) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          name,
-		Short:        short,
-		Version:      ReadBuildInfo().String(),
-		SilenceUsage: true,
-	}
+// CommandFunc returns a program's root command with its subcommands added. Main calls it once.
+type CommandFunc func() *cobra.Command
 
-	cmd.SetVersionTemplate("{{.DisplayName}} {{.Version}}\n")
-
-	return cmd
+// Main runs a program and ends the process with its exit code; it never returns. It starts SignalContext, builds the
+// command tree with root, runs it with Execute, and exits with Execute's code once the signal handler is released. A
+// program's main function is typically just cli.Main(cmd.Root).
+//
+// root is called after the signal handler is installed, so a signal that arrives while the tree is being built
+// cancels the context the commands run with instead of killing the process.
+func Main(root CommandFunc) {
+	os.Exit(run(root))
 }
 
-// NewVersionCommand returns a version subcommand that prints the root command's display name and its Version, or the
-// ReadBuildInfo line when the root's Version is empty. Under a root from NewRootCommand it prints the same line as
-// --version, including after the program changes the root's Version.
-func NewVersionCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Print the version",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			root := cmd.Root()
+// run is Main without the exit. os.Exit skips deferred calls, so stop has to run here, before Main exits.
+func run(root CommandFunc) int {
+	ctx, stop := SignalContext(context.Background())
+	defer stop()
 
-			_, err := fmt.Fprintln(
-				cmd.OutOrStdout(),
-				root.DisplayName(),
-				cmp.Or(root.Version, ReadBuildInfo().String()),
-			)
-			if err != nil {
-				return fmt.Errorf("printing version: %w", err)
-			}
-
-			return nil
-		},
-	}
+	return Execute(ctx, root())
 }

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -62,7 +61,7 @@ func Build(ctx context.Context, toolDir, outDir string) (Runner, error) {
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, Package)
 	cmd.Dir = toolDir
 
-	cmd.Env = append(os.Environ(), "GOWORK=off")
+	cmd.Env = append(cmd.Environ(), "GOWORK=off")
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 
@@ -94,7 +93,7 @@ func (r Runner) Run(ctx context.Context, dir, base string) (Result, error) {
 	cmd := exec.CommandContext(ctx, r.Path, "-base="+base) //nolint:gosec // The tool's own gorelease, not user input.
 	cmd.Dir = dir
 
-	cmd.Env = append(os.Environ(), "GOWORK=off")
+	cmd.Env = append(cmd.Environ(), "GOWORK=off")
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	// gorelease starts go commands of its own; don't wait on their pipes

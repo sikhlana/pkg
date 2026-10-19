@@ -1,3 +1,5 @@
+// Package configvalidator checks a config struct with its validate tags and its own Validate methods, reporting every
+// violation at once under the config key an operator would write, such as http.port, and never the value.
 package configvalidator
 
 import (

@@ -128,6 +128,9 @@ context: |
     with fx's error, and the godoc says so. A helper that annotates a
     value or a constructor with fixed dependencies (AsX) doesn't take
     them: an fx.In struct with static tags covers that.
+  - A helper that builds named instances builds each one itself,
+    through the module's Provider, passing the name as an option; it
+    never decorates the Provider.
   - A segment naming an action done to the value (built, wired,
     supplied) is separated by a double colon:
     name:"<module>:<purpose>::<action>" (name:"kernelrun:runner::built",

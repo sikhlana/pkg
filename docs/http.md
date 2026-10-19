@@ -20,7 +20,7 @@ Every server is named and there's no default runner name. The prefix keeps a ser
 
 `ProvideServer(name)` and `ProvideMiddleware(name)` each supply `name` into an unexported string group, and `Module` invokes a check over those two groups alone. Supplied strings cost nothing to build, so the check runs in every command without constructing a server, a middleware or a TLS configuration, and a command that doesn't use a server never reads its key files. `ProvideRunner`'s constructor takes the named server as optional and returns `ErrUnknownServer` when it's missing; it needs the server anyway, so no separate check is needed there.
 
-Names are also checked for shape: non-empty, letters, digits, `-`, `_` and `.`, failing with `ErrInvalidName`. A name ends up inside struct tags and runner names, where a quote breaks fx's tag parsing with an error that doesn't point at the name, and a colon could make a name tag equal one of the module's private tags. That happened once: the constructor's private result tag was `httpserver:server:built`, exactly the name tag of a server named `built`, which made a dependency cycle. Private tags now set off an action segment with a double colon (`httpserver:server::built`), and names can't hold `:`, so the two can't meet.
+Names are also checked for shape: non-empty, letters, digits, `-`, `_` and `.`, failing with `ErrInvalidName`. A name ends up inside struct tags and runner names, where a quote breaks fx's tag parsing with an error that doesn't point at the name, and a colon could make a name tag equal one of the module's private tags. That happened once: the constructor's private result tag was `httpserver:server:built`, exactly the name tag of a server named `built`, which made a dependency cycle. Private tags now set off an action segment with a double colon (`httpserver:spec::built`), and names can't hold `:`, so the two can't meet.
 
 ## Middleware order comes from the middleware
 
@@ -46,9 +46,15 @@ When the drain runs out of `shutdown_timeout`, `Serve` closes what's left and re
 
 Requests see the serve context's values, through `BaseContext`, but not its cancellation: ending the context starts the drain, it doesn't cancel the requests in flight.
 
-## Every record names its server
+## The module builds every server itself
 
-`ProvideServer` hands its constructor a Provider whose logger already carries `server=<name>`, so the server's own records, net/http's error log and tlsconfig's key pair records all name the server. With two TLS servers, a failed rotation would otherwise say which files but not which server. The cost: the constructor's Provider replaces the app's, so a decoration of the app's Provider doesn't reach servers built through `ProvideServer`.
+`ProvideServer`'s constructor returns a `Spec`, the server's `Config` and handler, and the module builds the server: it wraps the handler in the server's middleware, then calls the app's Provider with `WithName(name)`. The name puts `server=<name>` on the logger the server is built with, so the server's own records, net/http's error log and tlsconfig's key pair records all name the server. With two TLS servers, a failed rotation would otherwise say which files but not which server. The name has to reach the build, not the built server, because tlsconfig logs while the Provider builds the TLS configuration.
+
+Calling the Provider itself is what lets the module pass the name without replacing anything. When the constructor called the Provider, the only way to name the server was to hand that constructor a Provider of the module's own, through an `fx.Decorate` that swallowed any decoration the app made: metrics wrapped around the Provider never reached a server built through `ProvideServer`. Now there's one Provider in the graph, and an app's decoration applies to every server. The name travels as an option, so a decoration passes `opts...` on without knowing what's in them, and the Provider's next per-build setting won't change its signature. The constitution generalises this: a helper that builds named instances builds each one through the module's Provider and never decorates it.
+
+The middleware wraps the handler before the build, so a server is never modified after it's built, and a decoration that wraps the handler wraps the whole chain. Its wrap runs outside the middleware, recovery and auth included, which suits something that applies to every server, such as metrics. Middleware that has to run inside recovery or auth is a middleware with an order, not a decoration.
+
+Building the TLS configuration in `Listen` instead, so the name could be set after the build, was considered and rejected: it would move a bad key pair's failure from build to start, and a decoration still couldn't influence a build it didn't make.
 
 ## Timeouts and the TLS handshake
 

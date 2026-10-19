@@ -360,12 +360,14 @@ context: |
     otherwise holds the Module variable and wiring that spans ideas,
     such as a check the Module runs. A Params struct stays beside its
     constructor.
-  - Every sentinel error (an exported Err* variable) lives in
-    errors.go, so a package's failure modes are listed in one place
-    and an error doesn't move when a second idea starts using it. An
-    error type that is an idea of its own (configvalidator.Error)
-    lives there too. A package that is a single file keeps its
-    sentinels in it.
+  - Every sentinel error (an Err* variable, or err* in package main)
+    lives in errors.go, so a package's failure modes are listed in one
+    place and an error doesn't move when a second idea starts using
+    it. Error types that exist only to report failures go there too
+    (configvalidator's Error and Errors); an error type that is the
+    subject of its own file stays with it (cli's ExitError in exit.go,
+    SignalError in signal.go). A package that is a single file keeps
+    its sentinels in it.
   - Tests follow the file they test: x_test.go for x.go, and
     errors.go's sentinels are tested where they're returned.
     helpers_test.go and export_test.go hold shared test plumbing, and

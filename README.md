@@ -14,6 +14,7 @@ Each module gets a row here, in alphabetical order, as it lands. Import paths fo
 | [kernel](./kernel) | Turns cobra commands into fx apps run by kernelrun, with the logging flags, the event logger, opt-in config loading through Options.Config, and failures reported once in the log's format |
 | [kernelrun](./kernelrun) | Runs an fx app's named runners between its start and stop: the first to return stops the rest, panics become crashes, and OnStop hooks see the outcome |
 | [log](./log) | Builds the app's slog logger from developer wiring: level, format, destination, pluggable text handlers and record middleware |
+| [telemetry](./telemetry) | Sets OpenTelemetry up through fx: resource, W3C propagation and OTLP trace export over HTTP or gRPC, configured from operator config over the OTEL_* variables, and off until an endpoint is set |
 | [tls/tlsconfig](./tls/tlsconfig) | Turns client and server TLS settings into a tls.Config that re-reads rotating key pairs and CA files during handshakes, with client certificate policies |
 | [url/urlmask](./url/urlmask) | Turns a URL into a string that's safe to log, masking query and path parameter values, passwords and fragments while keeping its shape |
 

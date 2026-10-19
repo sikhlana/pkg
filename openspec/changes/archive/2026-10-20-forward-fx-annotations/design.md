@@ -60,3 +60,11 @@ Decisions 1 and 2 (why forward rather than wrap or bypass, and only where tags a
 ## Migration Plan
 
 One pull request, cherry-picked from the `add-httpserver` branch onto a branch off `origin/main`: kernelrun's forwarding, the tag rename and the constitution rules. The log, telemetry and configloader forwarding commits and their reverts are left out of the replay. Merging publishes kernelrun 0.3.0, log 0.1.1 and telemetry 0.1.1. `add-httpserver` follows in its own pull request, requiring kernelrun v0.3.0.
+
+## What happened
+
+- **Worked out on the `add-httpserver` branch, released first** in #27 (kernelrun 0.3.0, log 0.1.1, telemetry 0.1.1), cherry-picked onto a branch off `main`. `add-httpserver` followed in #28, its runner forwarding its name tag through `kernelrun.ProvideRunner`.
+- **Narrowed during review (decision 2).** Forwarding first went into `log.ProvideMiddleware` and the `AsX` helpers in log, telemetry and configloader too, each with a minor bump; those commits were reverted and left out of the replay, so log and telemetry shipped only the tag rename, as patches, and configloader didn't change.
+- **Two more constitution rules came along** from `add-httpserver` (named-instance runners as `<module>:<name>`, per-name groups as functions), so the constitution changed in one release.
+- **Rolled into `docs/kernel.md`:** decisions 1, 2 and 3, under "Named instances register through ProvideRunner too".
+- **Follow-ups left open:** none.

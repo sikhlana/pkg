@@ -48,6 +48,14 @@ fx rolls back a failed start with the start context, not the stop context. That 
 
 A loop module prepares in OnStart (binding its listener, opening its subscription), serves in its runner until the runner's context ends, and releases in OnStop what OnStart acquired. A setup failure is then a startup failure, reported before any runner starts, and a finished `Start` means everything is ready. It also makes a cancelled start harmless: fx rolls back with a context that may already be done, but nothing is serving yet.
 
+## Named instances register through ProvideRunner too
+
+`ProvideRunner` annotates its constructor with its own result tag, and fx can't annotate a constructor twice. A module with named instances (one runner per named server) needs the instance's tag on the constructor's parameters, built from a name that's only known at wiring time, so a struct tag can't spell it. Before kernelrun 0.3.0 that meant a private adapter type resolving the tag first, which every such module would have copied. `ProvideRunner` now takes `anns ...fx.Annotation` and applies them after its own, for the constructor's inputs and hooks; one that repeats its result tag fails startup with fx's error.
+
+Forwarding is only for helpers like this one, whose callers may need tags built at wiring time. It was briefly added to every helper that annotates a constructor, `log.ProvideMiddleware` and the `AsX` annotators included, and reverted: a constructor with fixed dependencies already takes tagged ones through an `fx.In` struct with static tags, so the variadic would only add surface. Bypassing `ProvideRunner` by providing a `Runner` into `RunnerGroup` directly was rejected too: it works without changing kernelrun, but each named-instance module would re-implement the helper. The full discussion is in the archived [forward-fx-annotations](../openspec/changes/archive/2026-10-20-forward-fx-annotations/design.md) change.
+
+The tag that pairs a built `Func` with its name is `kernelrun:runner::built`: a segment naming an action done to the value is set off by a double colon, so no tag built from an instance name, which can't contain `:`, can equal it.
+
 ## Every failure reported once, in the log's format
 
 A JSON service shouldn't end its log stream with a plain-text line, and a failure shouldn't be reported twice. Each phase therefore has one reporter:

@@ -22,6 +22,18 @@ The module SHALL start every registered runner, each in its own goroutine, after
 - **WHEN** a runner is registered as a constructor that takes a value from the graph
 - **THEN** the runner the constructor built is the one that runs
 
+### Requirement: A runner's constructor can take tagged dependencies
+
+Registering a runner from a constructor SHALL accept annotations for the constructor's inputs and hooks, applied with the registration's own, so a constructor can take a dependency provided under a name tag. An annotation that repeats one the registration sets itself SHALL fail startup.
+
+#### Scenario: A tagged dependency
+- **WHEN** a runner is registered from a constructor that takes a string, with an annotation tagging that parameter as `name:"greeting"`, and the app provides `"hello"` under that tag
+- **THEN** the runner the constructor built runs with `"hello"`
+
+#### Scenario: A repeated result tag
+- **WHEN** a runner is registered with an annotation tagging the constructor's result
+- **THEN** startup fails
+
 ### Requirement: The set of runners is checked before the app starts
 
 Running an app with no runners SHALL fail with the module's no-runners error. Two runners with the same name SHALL fail with its duplicate-runner error, and a runner with an empty name or no function with its invalid-runner error. Each failure SHALL happen before any OnStart hook runs.

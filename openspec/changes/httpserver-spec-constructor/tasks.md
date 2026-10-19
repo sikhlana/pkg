@@ -30,5 +30,8 @@ Added during apply, on review: `httpserver.go` had grown to hold the server, the
 - [x] 5.1 Split `httpserver.go` into `server.go`, `provider.go` and `options.go`, and its tests into `server_test.go` and `provider_test.go`.
 - [x] 5.2 Move `Spec`, `NameTag` and `ProvideServer` to `server.go`, and `MiddlewareGroup` and `ProvideMiddleware` to `middleware.go`; `module.go` keeps `Module`, the name check and the errors the helpers share.
 - [x] 5.3 `openspec/config.yaml`: the file-per-idea rule, and the module layout's `<idea>.go` line in place of `mymodule.go`.
-- [x] 5.4 Re-run 4.1 for `http/httpserver` and 4.2 across `go.work`.
+- [x] 5.4 kernel: the flag constants, `ErrMissingFlag`, `flagValues` and `readFlags` to `flags.go`; VERSION to 0.3.2.
+- [x] 5.5 log: `Format` and `ErrUnknownFormat` to `format.go`; `MiddlewareGroup`, `WithMiddleware` and `ProvideMiddleware` to `middleware.go`; VERSION to 0.1.2.
+- [x] 5.6 telemetry: `telemetry.go` into `resource.go` and `propagator.go`, `telemetry_test.go` into `resource_test.go`, `propagator_test.go` and `sink_test.go`; trace's protocols and exporters to `exporter.go` and its sampler resolvers to `config.go`; VERSION to 0.1.2.
+- [x] 5.7 Re-run 4.1 for every touched module, then 4.2 across `go.work`, and the release tool's `check --base origin/main`.
 

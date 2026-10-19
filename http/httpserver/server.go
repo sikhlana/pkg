@@ -9,17 +9,9 @@ import (
 	"net"
 	"net/http"
 	"sync"
-
-	"go.uber.org/fx"
-
-	"github.com/sikhlana/pkg/config/configvalidator"
 )
 
 var (
-	// ErrNilHandler is returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux, and fails
-	// startup for a ProvideServer constructor whose Spec has none, naming the server.
-	ErrNilHandler = errors.New("nil handler")
-
 	// ErrNotListening is returned by Server.Serve on a server that isn't listening: Listen hasn't bound it, or it's
 	// been closed.
 	ErrNotListening = errors.New("server is not listening")
@@ -58,76 +50,6 @@ type Server struct {
 	mu       sync.Mutex
 	state    state
 	listener net.Listener
-}
-
-// Provider builds a Server from a Config and the handler it serves. The Config is validated, and with TLS enabled
-// its key pair, and any client CAs, are read once to build the TLS configuration, which then re-reads them as they
-// rotate; a pair that can't be loaded fails the build. It returns ErrNilHandler for a nil handler. The Server it
-// returns is inert until Listen is called. opts set per-build settings, such as WithName; a decoration of a Provider
-// passes them on to keep them.
-type Provider func(cfg Config, handler http.Handler, opts ...Option) (*Server, error)
-
-// Option sets a per-build setting of a Provider.
-type Option func(*options)
-
-// options holds the settings a Provider's Options set for one build.
-type options struct {
-	name string
-}
-
-// WithName names the server: every record it logs carries the name as the server attribute, net/http's error reports
-// and tlsconfig's key pair records included. An empty name adds nothing.
-func WithName(name string) Option {
-	return func(o *options) {
-		o.name = name
-	}
-}
-
-// ProviderParams is NewProvider's input.
-type ProviderParams struct {
-	fx.In
-
-	// Logger receives the servers' records, and net/http's own error reports at Debug. Nil, or none in the graph,
-	// discards them.
-	Logger *slog.Logger `optional:"true"`
-}
-
-// NewProvider returns a Provider whose servers log through p.Logger.
-func NewProvider(p ProviderParams) Provider {
-	base := p.Logger
-
-	if base == nil {
-		base = slog.New(slog.DiscardHandler)
-	}
-
-	return func(cfg Config, handler http.Handler, opts ...Option) (*Server, error) {
-		if handler == nil {
-			return nil, ErrNilHandler
-		}
-
-		var o options
-
-		for _, opt := range opts {
-			opt(&o)
-		}
-
-		logger := base
-
-		if o.name != "" {
-			logger = logger.With(slog.String("server", o.name))
-		}
-
-		if err := configvalidator.Validate(&cfg); err != nil {
-			return nil, fmt.Errorf("validating config: %w", err)
-		}
-
-		tlsConfig, err := cfg.TLS.TLSConfig(logger)
-		if err != nil {
-			return nil, fmt.Errorf("building tls config: %w", err)
-		}
-
-		return &Server{cfg: cfg, handler: handler, tlsConfig: tlsConfig, logger: logger}, nil
-	}
 }
 
 // Listen binds the server's address. It returns ErrAlreadyListening once the server has bound a listener, even after

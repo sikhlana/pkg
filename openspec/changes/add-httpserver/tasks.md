@@ -85,5 +85,5 @@ Depends on `forward-fx-annotations`, released first: kernelrun v0.3.0's `Provide
 - [x] 10.1 `ProvideServer(name, constructor, anns...)` and `ProvideMiddleware(name, constructor, anns...)`, forwarded after their own; godoc and README rows.
 - [x] 10.2 `ProvideRunner` through `kernelrun.ProvideRunner` with `fx.ParamTags("", NameTag(name)+optional)`; `runnerServer` and `runnerParams` removed.
 - [x] 10.3 A test of both helpers forwarding `fx.ParamTags`; spec and design.md updated.
-- [ ] 10.4 In the replayed `add-httpserver` pull request, require kernelrun v0.3.0 in `http/httpserver/go.mod` once it's published.
+- [x] 10.4 In the replayed `add-httpserver` pull request, require kernelrun v0.3.0 in `http/httpserver/go.mod` once it's published.
 - [x] 10.5 Verification chain on http/httpserver, then the short sweep.

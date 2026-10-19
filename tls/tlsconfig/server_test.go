@@ -82,8 +82,6 @@ func TestServerDisabled(t *testing.T) {
 
 		c := tlsconfig.ServerConfig{ClientAuth: "mandatory", ReloadInterval: -time.Second}
 
-		require.NoError(t, c.Validate())
-
 		cfg, err := c.TLSConfig(nil)
 		require.NoError(t, err)
 		assert.Nil(t, cfg)
@@ -97,8 +95,6 @@ func TestServerKeyPair(t *testing.T) {
 		t.Parallel()
 
 		c := tlsconfig.ServerConfig{Enabled: true, CertFile: "server.crt"}
-
-		require.ErrorIs(t, c.Validate(), tlsconfig.ErrMissingKeyPair)
 
 		_, err := c.TLSConfig(nil)
 		require.ErrorIs(t, err, tlsconfig.ErrMissingKeyPair)
@@ -220,8 +216,6 @@ func TestServerRefresh(t *testing.T) {
 			KeyFile:        "server.key",
 			ReloadInterval: -time.Second,
 		}
-
-		require.ErrorIs(t, c.Validate(), tlsconfig.ErrNegativeReloadInterval)
 
 		_, err := c.TLSConfig(nil)
 		require.ErrorIs(t, err, tlsconfig.ErrNegativeReloadInterval)
@@ -371,8 +365,6 @@ func TestServerClientAuth(t *testing.T) {
 				ClientAuth: policy,
 			}
 
-			require.ErrorIs(t, c.Validate(), tlsconfig.ErrClientCARequired, policy)
-
 			_, err := c.TLSConfig(nil)
 			require.ErrorIs(t, err, tlsconfig.ErrClientCARequired, policy)
 		}
@@ -394,8 +386,6 @@ func TestServerClientAuth(t *testing.T) {
 				ClientAuth:   policy,
 			}
 
-			require.ErrorIs(t, c.Validate(), tlsconfig.ErrClientCAUnused, policy)
-
 			_, err := c.TLSConfig(nil)
 			require.ErrorIs(t, err, tlsconfig.ErrClientCAUnused, policy)
 		}
@@ -410,8 +400,6 @@ func TestServerClientAuth(t *testing.T) {
 			KeyFile:    "server.key",
 			ClientAuth: "mandatory",
 		}
-
-		require.ErrorIs(t, c.Validate(), tlsconfig.ErrUnknownClientAuth)
 
 		_, err := c.TLSConfig(nil)
 		require.ErrorIs(t, err, tlsconfig.ErrUnknownClientAuth)

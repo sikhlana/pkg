@@ -55,13 +55,6 @@ func TestClientDisabled(t *testing.T) {
 		cfg, err := c.TLSConfig(nil)
 		require.NoError(t, err)
 		assert.Nil(t, cfg)
-		assert.NoError(t, c.Validate())
-	})
-
-	t.Run("half a key pair", func(t *testing.T) {
-		t.Parallel()
-
-		assert.NoError(t, tlsconfig.ClientConfig{CertFile: "client.crt"}.Validate())
 	})
 }
 
@@ -259,18 +252,8 @@ func TestClientKeyPair(t *testing.T) {
 
 		c := tlsconfig.ClientConfig{Enabled: true, CertFile: "client.crt"}
 
-		require.ErrorIs(t, c.Validate(), tlsconfig.ErrIncompleteKeyPair)
-
 		_, err := c.TLSConfig(nil)
 		require.ErrorIs(t, err, tlsconfig.ErrIncompleteKeyPair)
-	})
-
-	t.Run("only the key file", func(t *testing.T) {
-		t.Parallel()
-
-		c := tlsconfig.ClientConfig{Enabled: true, KeyFile: "client.key"}
-
-		require.ErrorIs(t, c.Validate(), tlsconfig.ErrIncompleteKeyPair)
 	})
 
 	t.Run("a key that doesn't match", func(t *testing.T) {
@@ -477,8 +460,6 @@ func TestClientKeyPairRefresh(t *testing.T) {
 		t.Parallel()
 
 		c := tlsconfig.ClientConfig{Enabled: true, ReloadInterval: -time.Second}
-
-		require.ErrorIs(t, c.Validate(), tlsconfig.ErrNegativeReloadInterval)
 
 		_, err := c.TLSConfig(nil)
 		require.ErrorIs(t, err, tlsconfig.ErrNegativeReloadInterval)

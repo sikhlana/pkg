@@ -124,3 +124,19 @@ Run at a higher effort, it found fifteen issues; fourteen were fixed, and one (p
 - **README and CLAUDE.md**: the marker's real name, the close-then-comment order, and the README's row in CLAUDE.md's table naming the weekly scan.
 - **Declined: running the scans in parallel.** Ten modules take minutes in a thirty-minute job on a two-core runner where each govulncheck already uses both cores; worth revisiting if the job nears its timeout.
 
+## What actually happened
+
+Merged as #23. Pull requests run govulncheck on their selected modules and on `tools/release` (with the `tool` pattern), and `.github/workflows/vulncheck.yaml` runs `release vulncheck` weekly and on demand, keeping one `govulncheck` issue. Deviations from the decisions above, each recorded in the review sections:
+
+- govulncheck is pinned by a `tool` directive in `tools/release/go.mod` and built by the release-tool action, not by a workflow env var and `go install` (decision 2).
+- The marker records module:ID findings with `+fix` (or a digest), so an advisory spreading to another module or gaining a fix comments too, and a hand-edited body is replaced silently (decision 3).
+- A dispatch on a branch other than main is a dry run, and a partial scan still reaches the step summary, marked incomplete.
+- The mimetype bumps (decision 5) moved to their own pull request, #24, before #23 opened: a retraction isn't a vulnerability.
+- Running the scans in parallel, declined in the third review, was done afterwards by the `parallelise-release-tool` change (#25), which supersedes that note.
+
+After #23 merged, the weekly workflow was run by hand on main: it scanned every module, found nothing, and left the issue tracker alone, as expected with every module clean. That exercised the no-findings row against the real API; the rows that open, update and close the issue have so far run only against the mocked tracker.
+
+## Follow-ups left open
+
+- The issue-opening, updating and closing paths will first run for real when an advisory lands on main; check the first issue the workflow opens.
+- The pull request vulnerability job first runs on real modules with the next pull request that changes one.

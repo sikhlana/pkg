@@ -5,7 +5,7 @@ go 1.27
 require (
 	github.com/sikhlana/pkg/config/configloader v0.1.3
 	github.com/sikhlana/pkg/config/configvalidator v0.1.2
-	github.com/sikhlana/pkg/kernelrun v0.2.0
+	github.com/sikhlana/pkg/kernelrun v0.3.0
 	github.com/sikhlana/pkg/tls/tlsconfig v0.1.0
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/fx v1.24.0

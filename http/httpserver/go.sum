@@ -32,8 +32,8 @@ github.com/sikhlana/pkg/config/configloader v0.1.3 h1:eNIblmZgTPX2+jVmGhiqguIpcw
 github.com/sikhlana/pkg/config/configloader v0.1.3/go.mod h1:GSXhZmi1jlAWwLYt04Hmbi3/rLOuAhB5f3H9VcGXX4w=
 github.com/sikhlana/pkg/config/configvalidator v0.1.2 h1:MF/YFY6u/J2gQrTYvzul7fK+4O8kEwX654Q9l/5x46Y=
 github.com/sikhlana/pkg/config/configvalidator v0.1.2/go.mod h1:HytE+feXVaO67Eiun4Rm9ZJlsljsUbx39NRd1QW0i+A=
-github.com/sikhlana/pkg/kernelrun v0.2.0 h1:GbFxtaUB5ttmcYeBBew57vOekN/qVXAfWBhDhEYVZaQ=
-github.com/sikhlana/pkg/kernelrun v0.2.0/go.mod h1:XbDRKdjADkwbmO9mcvZZYzKYYDIKxLbvtN59Kt1lEOo=
+github.com/sikhlana/pkg/kernelrun v0.3.0 h1:t1gkMNdZwmmPQvsRezUP7nDdwws69u3XdJo1TA4A9jo=
+github.com/sikhlana/pkg/kernelrun v0.3.0/go.mod h1:XbDRKdjADkwbmO9mcvZZYzKYYDIKxLbvtN59Kt1lEOo=
 github.com/sikhlana/pkg/tls/tlsconfig v0.1.0 h1:CYoTWv4y1kCKM6fOG7GuutdW55lzntux46VBKCfPXLc=
 github.com/sikhlana/pkg/tls/tlsconfig v0.1.0/go.mod h1:ax9LRHN3CcuOwchSNSShQKWzFvpZF497WYy8M+1kjA4=
 github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 h1:+jumHNA0Wrelhe64i8F6HNlS8pkoyMv5sreGx2Ry5Rw=

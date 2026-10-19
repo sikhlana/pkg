@@ -1,3 +1,6 @@
+// Package cli is the cobra scaffolding for a program's main: a context that a signal cancels, exit codes that commands
+// return instead of calling os.Exit, consistent root and version commands, and build information that works with or
+// without link-time flags.
 package cli
 
 import (

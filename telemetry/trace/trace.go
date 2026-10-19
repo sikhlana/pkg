@@ -1,3 +1,6 @@
+// Package trace provides the app's OpenTelemetry tracer provider, exporting spans over OTLP with telemetry's shared
+// settings and sampling them as its Config says, or the provider the app supplies. Without an endpoint, the provider
+// records and exports nothing.
 package trace
 
 import (

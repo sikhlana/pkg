@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"go.uber.org/fx"
 )
 
 var (
@@ -218,4 +220,57 @@ func (s *Server) drain(ctx context.Context, srv *http.Server) error {
 	s.logger.LogAttrs(ctx, slog.LevelDebug, "http server stopped")
 
 	return nil
+}
+
+// Spec is what a ProvideServer constructor says the server serves: its Config and its handler.
+type Spec struct {
+	Config  Config
+	Handler http.Handler
+}
+
+// NameTag returns the fx name tag ProvideServer provides the server name under, for injecting it with fx.ParamTags or
+// a name struct tag.
+func NameTag(name string) string {
+	return fmt.Sprintf(`name:"httpserver:server:%s"`, name)
+}
+
+// builtSpec names a ProvideServer constructor's result inside the private module that builds the server from it.
+const builtSpec = `name:"httpserver:spec::built"`
+
+// ProvideServer provides the server name, injectable under NameTag(name), built from the Spec constructor returns.
+// constructor can take any parameters fx can supply, and returns a Spec, optionally followed by an error. ProvideServer
+// wraps the Spec's handler in the middleware in MiddlewareGroup(name), ordered as Chain orders them, then builds the
+// server by calling the app's Provider with WithName(name), so the name is on every record the server logs. A
+// decoration of the Provider applies to the server, and a handler it wraps already runs the middleware. A Spec with a
+// nil handler fails startup with an error matching ErrNilHandler that names the server.
+//
+// Providing a server doesn't run it, and nothing is built until something injects it: list ProvideRunner(name) in
+// the commands that serve it. A name provided twice fails startup, and an invalid one with ErrInvalidName.
+//
+// anns are applied to constructor after ProvideServer's own result tag, for its inputs and hooks: fx.ParamTags to
+// take a tagged dependency, fx.From, fx.OnStart, fx.OnStop. One that tags or converts the result fails startup.
+func ProvideServer(name string, constructor any, anns ...fx.Annotation) fx.Option {
+	if err := checkName(name); err != nil {
+		return fx.Error(err)
+	}
+
+	return fx.Module(
+		"httpserver",
+		fx.Provide(
+			fx.Private,
+			fx.Annotate(constructor, append([]fx.Annotation{fx.ResultTags(builtSpec)}, anns...)...),
+		),
+		fx.Provide(fx.Annotate(
+			func(spec Spec, p Provider, mws []Middleware) (*Server, error) {
+				if spec.Handler == nil {
+					return nil, fmt.Errorf("%w: server %q", ErrNilHandler, name)
+				}
+
+				return p(spec.Config, Chain(spec.Handler, mws...), WithName(name))
+			},
+			fx.ParamTags(builtSpec, "", MiddlewareGroup(name)),
+			fx.ResultTags(NameTag(name)),
+		)),
+		fx.Supply(fx.Annotate(name, fx.ResultTags(serverNames))),
+	)
 }

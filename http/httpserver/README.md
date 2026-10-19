@@ -11,7 +11,7 @@ One Config per server. configloader validates it when it loads it; the Provider 
 | host | string | The hostname or IP address to listen on, IPv6 written bare (::1). Empty listens on every interface. |
 | port | int | The TCP port, from 0 to 65535. 0 picks a free port, which Server.Addr reports once bound, so set it explicitly in production: a forgotten port listens somewhere random rather than failing. |
 | read_timeout | duration | Bounds reading a whole request, body included. Zero means 5s. |
-| read_header_timeout | duration | Bounds reading a request's headers. Zero means 1s. With TLS it usually bounds the handshake too; see below. |
+| read_header_timeout | duration | Bounds reading a request's headers. Zero means 5s. With TLS it can bound the handshake too; see below. |
 | write_timeout | duration | Bounds writing a response, from the end of the request's headers. Zero means 10s. |
 | idle_timeout | duration | Bounds the wait for a keep-alive connection's next request. Zero means 60s. |
 | shutdown_timeout | duration | Bounds draining in-flight requests once the server is told to stop. Zero means 10s. See the note on shutdown below. |
@@ -21,7 +21,7 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 
 **Timeouts can't be turned off.** Zero means the default, so every server bounds reads and writes. A handler that streams (server-sent events, long polling) or takes large uploads extends its own deadlines per request with `http.ResponseController`'s `SetWriteDeadline` and `SetReadDeadline`, leaving the rest of the server protected from slow clients.
 
-**TLS handshakes share the shortest timeout.** net/http bounds each TLS handshake by the smallest of read_header_timeout, read_timeout and write_timeout, which with the defaults is read_header_timeout's 1s. A handshake that takes longer, from a client on a high-latency link or with client certificates to verify, fails with an i/o timeout that's logged only at Debug. Raise read_header_timeout when clients are far away or connections fail during the handshake.
+**TLS handshakes share the shortest timeout.** net/http bounds each TLS handshake by the smallest of read_header_timeout, read_timeout and write_timeout, 5s with the defaults. Lowering any of them lowers the handshake's bound too: a handshake that runs out of time, from a client on a high-latency link or with client certificates to verify, fails with an i/o timeout that's logged only at Debug. Keep all three above a second or two when serving TLS to distant clients.
 
 **Shutdown.** When a server's runner is cancelled it stops accepting connections and waits up to shutdown_timeout for in-flight requests, whose contexts carry the runner context's values but aren't cancelled with it. Connections still active then are closed, and the runner returns an error matching ErrShutdownTimeout, which kernelrun reports as a crash: requests were cut, and the process exits non-zero. Keep shutdown_timeout below your orchestrator's grace period (Kubernetes' terminationGracePeriodSeconds, 30s by default), so the drain finishes before a SIGKILL.
 
@@ -47,7 +47,7 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | Config | A server's operator settings. |
 | Config.Validate | Returns ErrNegativeTimeout for each negative timeout and the tls settings' own errors, each under its config key. Host and port are checked by their validate tags. |
 | DefaultReadTimeout | 5s, used when read_timeout is zero. |
-| DefaultReadHeaderTimeout | 1s, used when read_header_timeout is zero. |
+| DefaultReadHeaderTimeout | 5s, used when read_header_timeout is zero. |
 | DefaultWriteTimeout | 10s, used when write_timeout is zero. |
 | DefaultIdleTimeout | 60s, used when idle_timeout is zero. |
 | DefaultShutdownTimeout | 10s, used when shutdown_timeout is zero. |

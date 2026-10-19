@@ -24,7 +24,7 @@ func TestConfigZeroTimeoutsUseTheDefaults(t *testing.T) {
 	srv := httpserver.HTTPServer(t.Context(), s)
 
 	assert.Equal(t, 5*time.Second, srv.ReadTimeout)
-	assert.Equal(t, time.Second, srv.ReadHeaderTimeout)
+	assert.Equal(t, 5*time.Second, srv.ReadHeaderTimeout)
 	assert.Equal(t, 10*time.Second, srv.WriteTimeout)
 	assert.Equal(t, 60*time.Second, srv.IdleTimeout)
 	assert.Equal(t, 10*time.Second, httpserver.ShutdownTimeout(s))

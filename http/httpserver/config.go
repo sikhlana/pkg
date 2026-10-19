@@ -15,8 +15,10 @@ const (
 	// DefaultReadTimeout bounds reading a whole request, body included, when ReadTimeout is zero.
 	DefaultReadTimeout = 5 * time.Second
 
-	// DefaultReadHeaderTimeout bounds reading a request's headers when ReadHeaderTimeout is zero.
-	DefaultReadHeaderTimeout = 1 * time.Second
+	// DefaultReadHeaderTimeout bounds reading a request's headers when ReadHeaderTimeout is zero. It matches
+	// DefaultReadTimeout, so TLS handshakes, which net/http bounds by the shortest of the two and WriteTimeout, get
+	// 5s by default.
+	DefaultReadHeaderTimeout = 5 * time.Second
 
 	// DefaultWriteTimeout bounds writing a response when WriteTimeout is zero.
 	DefaultWriteTimeout = 10 * time.Second
@@ -43,8 +45,7 @@ type Config struct {
 	ReadTimeout time.Duration `mapstructure:"read_timeout"`
 
 	// ReadHeaderTimeout bounds reading a request's headers. Zero means DefaultReadHeaderTimeout. With TLS, net/http
-	// also bounds each handshake by the smallest of ReadHeaderTimeout, ReadTimeout and WriteTimeout, which with the
-	// defaults is this one.
+	// also bounds each handshake by the smallest of ReadHeaderTimeout, ReadTimeout and WriteTimeout.
 	ReadHeaderTimeout time.Duration `mapstructure:"read_header_timeout"`
 
 	// WriteTimeout bounds writing a response, from the end of the request's headers. Zero means DefaultWriteTimeout.

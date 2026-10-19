@@ -24,10 +24,6 @@ const (
 	ConfigFlag = "config"
 )
 
-// ErrMissingFlag is returned by App.Run for a command whose root wasn't built by App.RootCommand. The error names the
-// first flag missing.
-var ErrMissingFlag = errors.New("missing kernel flag")
-
 // flagValues holds the root's flags as Run reads them.
 type flagValues struct {
 	debug  bool

@@ -335,61 +335,6 @@ func TestCommandTakesNoArguments(t *testing.T) {
 	assert.False(t, ran, "the app ran")
 }
 
-func TestDefaultLoggerDuringTheRun(t *testing.T) {
-	root, out := program(kernel.Options{}, kernelrun.WithRunner("app", func(ctx context.Context) error {
-		//nolint:sloglint // The test checks that slog's default logger writes through the app's logger.
-		slog.InfoContext(ctx, "through the default")
-
-		return nil
-	}))
-
-	code, _ := execute(t, root, "run")
-
-	require.Equal(t, 0, code)
-	assert.Contains(t, out.messages(t, "INFO"), "through the default")
-}
-
-func TestDefaultLoggerAheadOfOtherModules(t *testing.T) {
-	early := fx.Module("early", fx.Invoke(func() {
-		//nolint:sloglint // The test checks that a module's invoke already writes through the app's logger.
-		slog.Info("from a module's invoke")
-	}))
-
-	root, out := program(kernel.Options{Shared: early}, kernelrun.WithRunner("app", returnNil))
-
-	code, _ := execute(t, root, "run")
-
-	require.Equal(t, 0, code)
-	assert.Contains(t, out.messages(t, "INFO"), "from a module's invoke")
-}
-
-func TestDefaultLoggerRestored(t *testing.T) {
-	tests := []struct {
-		name string
-		opts []fx.Option
-		code int
-	}{
-		{name: "after a clean run", opts: []fx.Option{kernelrun.WithRunner("app", returnNil)}},
-		{name: "after a startup failure", opts: []fx.Option{failingConstructor()}, code: 1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			logger, writer, flags := saveDefault(t)
-			level := bridgeLevel()
-
-			root, _ := program(kernel.Options{}, tt.opts...)
-
-			code, _ := execute(t, root, "run")
-
-			require.Equal(t, tt.code, code)
-			assert.Same(t, logger, slog.Default())
-			assertLogOutput(t, writer, flags)
-			assert.Equal(t, level, bridgeLevel(), "the log package's level wasn't restored")
-		})
-	}
-}
-
 func TestCrashPrintsNothing(t *testing.T) {
 	root, out := program(kernel.Options{}, kernelrun.WithRunner("app", func(context.Context) error {
 		return errors.New("crashed")

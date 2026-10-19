@@ -98,15 +98,20 @@ func absent(m Middleware) bool {
 		return absent(o.Middleware)
 	}
 
-	if m == nil {
+	return isNil(m)
+}
+
+// isNil reports whether v is nil, or a nil pointer, func, map, slice or channel behind an interface.
+func isNil(v any) bool {
+	if v == nil {
 		return true
 	}
 
-	v := reflect.ValueOf(m)
+	rv := reflect.ValueOf(v)
 
-	switch v.Kind() { //nolint:exhaustive // Only kinds that can be nil are checked; the rest never are.
+	switch rv.Kind() { //nolint:exhaustive // Only kinds that can be nil are checked; the rest never are.
 	case reflect.Pointer, reflect.Func, reflect.Map, reflect.Slice, reflect.Chan, reflect.Interface:
-		return v.IsNil()
+		return rv.IsNil()
 	default:
 		return false
 	}

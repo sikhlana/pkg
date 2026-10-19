@@ -4,18 +4,26 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
+	"io/fs"
 	"log" //nolint:depguard // the test proves nothing reaches the standard library's log output
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.uber.org/fx"
+	"go.uber.org/fx/fxtest"
 
 	"github.com/sikhlana/pkg/http/httpserver"
 	"github.com/sikhlana/pkg/tls/tlsconfig"
@@ -502,4 +510,363 @@ func TestRequestContextsCarryServeValues(t *testing.T) {
 	assert.False(t, <-cancelled, "ending Serve's context drains the request rather than cancelling it")
 	require.NoError(t, waitFor(t, results))
 	require.NoError(t, waitFor(t, done))
+}
+
+func TestUnusedServerIsNotBuilt(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+
+	broken := httpserver.Config{
+		Host: "127.0.0.1",
+		TLS: tlsconfig.ServerConfig{
+			Enabled:  true,
+			CertFile: filepath.Join(t.TempDir(), "missing.crt"),
+			KeyFile:  filepath.Join(t.TempDir(), "missing.key"),
+		},
+	}
+
+	require.NoError(
+		t,
+		run(t, shared(slog.New(slog.DiscardHandler), configs{"api": broken}, provide("api", &calls)), idle),
+	)
+	assert.Zero(t, calls.Load())
+}
+
+func TestInjectedServerDoesNotBind(t *testing.T) {
+	t.Parallel()
+
+	var (
+		calls atomic.Int32
+		got   servers
+	)
+
+	app := fxtest.New(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()}, provide("api", &calls)),
+		fx.Invoke(func(s servers) { got = s }),
+	)
+	app.RequireStart()
+
+	require.NotNil(t, got.API)
+	assert.Nil(t, got.API.Addr(), "no socket")
+	assert.Equal(t, int32(1), calls.Load())
+
+	app.RequireStop()
+}
+
+func TestDuplicateServerNameFailsStartup(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+
+	app := fx.New(
+		fx.NopLogger,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()}, provide("api", &calls), provide("api", &calls)),
+		fx.Invoke(func(servers) {}),
+	)
+
+	require.Error(t, app.Err())
+}
+
+func TestRecordsCarryTheServerName(t *testing.T) {
+	t.Parallel()
+
+	rec := newRecorder()
+	ca := newAuthority(t)
+	pair := ca.issue(t, t.TempDir())
+
+	secure := plain()
+	secure.TLS = tlsconfig.ServerConfig{Enabled: true, CertFile: pair.CertFile, KeyFile: pair.KeyFile}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(rec), configs{"api": secure}, provide("api", &calls)),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			var d net.Dialer
+
+			conn, err := d.DialContext(ctx, "tcp", s.API.Addr().String())
+			if err != nil {
+				return err
+			}
+
+			_, _ = io.WriteString(conn, "hello, server\r\n\r\n")
+			_, _ = io.Copy(io.Discard, conn)
+			_ = conn.Close()
+
+			assert.Eventually(t, func() bool { return handshakeRecord(rec) != nil }, 5*time.Second, 10*time.Millisecond)
+
+			return nil
+		}),
+	)
+	require.NoError(t, err)
+
+	listening, found := rec.find("http server listening")
+	require.True(t, found)
+	assert.Equal(t, "api", listening.Attrs["server"])
+
+	draining, found := rec.find("http server draining")
+	require.True(t, found)
+	assert.Equal(t, "api", draining.Attrs["server"])
+
+	handshake := handshakeRecord(rec)
+	require.NotNil(t, handshake)
+	assert.Equal(t, slog.LevelDebug, handshake.Level)
+	assert.Equal(t, "api", handshake.Attrs["server"])
+
+	loaded, found := rec.find("tls server key pair loaded")
+	require.True(t, found)
+	assert.Equal(t, "api", loaded.Attrs["server"], "tlsconfig's records carry the name too")
+}
+
+func TestNilHandlerFailsStartup(t *testing.T) {
+	t.Parallel()
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{},
+			httpserver.ProvideServer("api", func() httpserver.Spec {
+				return httpserver.Spec{Config: plain()}
+			}),
+		),
+		httpserver.ProvideRunner("api"),
+	)
+
+	require.ErrorIs(t, err, httpserver.ErrNilHandler)
+	assert.Contains(t, err.Error(), `server "api"`)
+}
+
+func TestNilPointerHandlerFailsStartup(t *testing.T) {
+	t.Parallel()
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{},
+			httpserver.ProvideServer("api", func() httpserver.Spec {
+				var h *pointerHandler
+
+				return httpserver.Spec{Config: plain(), Handler: h}
+			}),
+		),
+		httpserver.ProvideRunner("api"),
+	)
+
+	require.ErrorIs(t, err, httpserver.ErrNilHandler)
+	assert.Contains(t, err.Error(), `server "api"`)
+}
+
+func TestBuildFailuresNameTheServer(t *testing.T) {
+	t.Parallel()
+
+	broken := plain()
+	broken.TLS = tlsconfig.ServerConfig{
+		Enabled:  true,
+		CertFile: filepath.Join(t.TempDir(), "missing.crt"),
+		KeyFile:  filepath.Join(t.TempDir(), "missing.key"),
+	}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"admin": broken}, provide("admin", &calls)),
+		httpserver.ProvideRunner("admin"),
+	)
+
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	assert.Contains(t, err.Error(), `building server "admin"`)
+}
+
+func TestConstructorErrorFailsStartup(t *testing.T) {
+	t.Parallel()
+
+	errHandler := errors.New("handler unavailable")
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{},
+			httpserver.ProvideServer("api", func() (httpserver.Spec, error) {
+				return httpserver.Spec{}, errHandler
+			}),
+		),
+		httpserver.ProvideRunner("api"),
+	)
+
+	require.ErrorIs(t, err, errHandler)
+}
+
+// handshakeRecord returns net/http's record of a failed TLS handshake, or nil.
+func handshakeRecord(rec *recorder) *record {
+	for _, r := range rec.all() {
+		if strings.Contains(r.Message, "TLS handshake error") {
+			return &r
+		}
+	}
+
+	return nil
+}
+
+func TestAServerNamedBuilt(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"built": plain()}, provide("built", &calls)),
+		httpserver.ProvideRunner("built"),
+		probe(func(context.Context, servers) error { return nil }),
+	)
+
+	require.NoError(t, err, "the name can't collide with the module's private tags")
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// statusWriter remembers the status a handler wrote.
+type statusWriter struct {
+	http.ResponseWriter
+
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+// recording decorates the app's Provider, as an app adding metrics would: it wraps every server's handler to record
+// each response's status in tr, and passes the build's options on.
+func recording(tr *trail) fx.Option {
+	return fx.Decorate(func(p httpserver.Provider) httpserver.Provider {
+		return func(cfg httpserver.Config, h http.Handler, opts ...httpserver.Option) (*httpserver.Server, error) {
+			return p(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+				h.ServeHTTP(sw, r)
+				tr.add(strconv.Itoa(sw.status))
+			}), opts...)
+		}
+	})
+}
+
+func TestADecorationOfTheProviderReachesEveryServer(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain(), "admin": plain()},
+			provide("api", &calls),
+			provide("admin", &calls),
+			recording(tr),
+		),
+		httpserver.ProvideRunner("api"),
+		httpserver.ProvideRunner("admin"),
+		probe(func(ctx context.Context, s servers) error {
+			if _, _, err := fetch(ctx, s.API.Addr()); err != nil {
+				return err
+			}
+
+			_, _, err := fetch(ctx, s.Admin.Addr())
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"200", "200"}, tr.all(), "one request to each server")
+}
+
+func TestADecorationWrapsOutsideTheMiddleware(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()},
+			provide("api", &calls),
+			httpserver.ProvideMiddleware("api", func() httpserver.Middleware {
+				return httpserver.MiddlewareFunc(func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
+					w.WriteHeader(http.StatusUnauthorized)
+				})
+			}),
+			recording(tr),
+		),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			status, _, err := fetch(ctx, s.API.Addr())
+			assert.Equal(t, http.StatusUnauthorized, status)
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"401"}, tr.all(), "the decoration saw the request the middleware answered")
+}
+
+func TestTheNameSurvivesADecoration(t *testing.T) {
+	t.Parallel()
+
+	rec := newRecorder()
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(rec), configs{"api": plain()}, provide("api", &calls), recording(&trail{})),
+		httpserver.ProvideRunner("api"),
+		probe(func(context.Context, servers) error { return nil }),
+	)
+
+	require.NoError(t, err)
+
+	listening, found := rec.find("http server listening")
+	require.True(t, found)
+	assert.Equal(t, "api", listening.Attrs["server"])
+}
+
+func TestADecorationInASiblingModuleReachesNoServer(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()},
+			fx.Module("api", provide("api", &calls)),
+			fx.Module("metrics", recording(tr)),
+		),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			_, _, err := fetch(ctx, s.API.Addr())
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, tr.all(), "fx scopes a decoration to its own module and the modules inside it")
+}
+
+func TestADecorationInAnEnclosingModuleReachesItsServers(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()},
+			fx.Module("app", recording(tr), fx.Module("api", provide("api", &calls))),
+		),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			_, _, err := fetch(ctx, s.API.Addr())
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"200"}, tr.all())
 }

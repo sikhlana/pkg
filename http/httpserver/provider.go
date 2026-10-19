@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,15 +10,11 @@ import (
 	"github.com/sikhlana/pkg/config/configvalidator"
 )
 
-// ErrNilHandler is returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux, and fails
-// startup for a ProvideServer constructor whose Spec has none, naming the server.
-var ErrNilHandler = errors.New("nil handler")
-
 // Provider builds a Server from a Config and the handler it serves. The Config is validated, and with TLS enabled
 // its key pair, and any client CAs, are read once to build the TLS configuration, which then re-reads them as they
-// rotate; a pair that can't be loaded fails the build. It returns ErrNilHandler for a nil handler. The Server it
-// returns is inert until Listen is called. opts set per-build settings, such as WithName; a decoration of a Provider
-// passes them on to keep them.
+// rotate; a pair that can't be loaded fails the build. It returns ErrNilHandler for a nil handler, or a nil pointer or
+// func behind the interface. The Server it returns is inert until Listen is called. opts set per-build settings, such
+// as WithName, and a nil Option is skipped; a decoration of a Provider passes them on to keep them.
 type Provider func(cfg Config, handler http.Handler, opts ...Option) (*Server, error)
 
 // ProviderParams is NewProvider's input.
@@ -40,14 +35,16 @@ func NewProvider(p ProviderParams) Provider {
 	}
 
 	return func(cfg Config, handler http.Handler, opts ...Option) (*Server, error) {
-		if handler == nil {
+		if isNil(handler) {
 			return nil, ErrNilHandler
 		}
 
 		var o options
 
 		for _, opt := range opts {
-			opt(&o)
+			if opt != nil {
+				opt(&o)
+			}
 		}
 
 		logger := base

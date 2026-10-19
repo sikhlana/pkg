@@ -30,7 +30,7 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | Name | Description |
 |------|-------------|
 | Module | Provides the Provider and checks at startup that every ProvideMiddleware names a provided server. Builds no server itself. Takes the app's *slog.Logger when there is one. |
-| ProvideServer | Provides a server under a name, built from the Spec a constructor returns, optionally with an error. Wraps the Spec's handler in that name's middleware, then builds the server through the app's Provider with WithName, so the server's, net/http's and tlsconfig's records carry the name, and a decoration of the Provider applies to every server. Built only when something injects it. A name provided twice fails startup, a Spec without a handler fails it with ErrNilHandler naming the server, and an invalid name with ErrInvalidName. Further fx annotations apply to the constructor after its own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency. |
+| ProvideServer | Provides a server under a name, built from the Spec a constructor returns, optionally with an error. Wraps the Spec's handler in that name's middleware, then builds the server through the app's Provider with WithName, so the server's, net/http's and tlsconfig's records carry the name, and a decoration of the Provider at the app's root, or in a module enclosing ProvideServer, applies to the server. Built only when something injects it. A name provided twice fails startup, a Spec whose handler is nil (or a nil pointer or func) fails it with ErrNilHandler, every build failure names the server, and an invalid name fails it with ErrInvalidName. Further fx annotations apply to the constructor after its own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency. |
 | ProvideRunner | Opts a command in to running the named server as the kernelrun runner httpserver:name: binds in OnStart, serves in the runner, releases an unserved listener in OnStop. Fails startup with ErrUnknownServer for an unknown name and ErrInvalidName for an invalid one. |
 | ProvideMiddleware | Adds the middleware a constructor builds to the named server's chain. The constructor returns any type implementing Middleware and runs only when the server is built. A constructor returning a nil Middleware leaves it out. Fails startup with ErrUnknownServer for an unknown name and ErrInvalidName for an invalid one. Further fx annotations apply to the constructor after its own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency. |
 | Spec | What a ProvideServer constructor says a server serves. |
@@ -38,7 +38,7 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | Spec.Handler | The handler the server serves, before its middleware. Must not be nil. |
 | NameTag | Returns the name tag a server is provided under: name:"httpserver:server:NAME". |
 | MiddlewareGroup | Returns the group tag a server collects its middleware from, group:"httpserver:middleware:NAME", for injecting it elsewhere. Add to it with ProvideMiddleware: registering into the group directly skips the unknown-name check. |
-| Provider | Builds a Server from a Config, a handler and any Options. Validates the Config, reads the TLS files once to build the TLS configuration, and fails for a nil handler or a key pair that can't be loaded. A decoration passes the Options on to keep them. |
+| Provider | Builds a Server from a Config, a handler and any Options. Validates the Config, reads the TLS files once to build the TLS configuration, and fails for a nil handler (or a nil pointer or func) or a key pair that can't be loaded. Skips a nil Option. A decoration passes the Options on to keep them. |
 | Option | A per-build setting of a Provider. |
 | WithName | Names the server: every record it logs, net/http's and tlsconfig's included, carries the name as server. An empty name adds nothing. ProvideServer passes it for every server; pass it yourself to a server built without fx. |
 | ProviderParams | NewProvider's input: an optional Logger. |
@@ -134,6 +134,8 @@ func newServer(c Config, store *Store) (httpserver.Spec, error) {
 	return httpserver.Spec{Config: c.Config, Handler: h}, nil
 }
 ```
+
+Return a `Spec` value, not a `*Spec`: fx matches results by type, so a pointer leaves `ProvideServer` waiting for a `Spec` that never comes, and startup fails naming its private tag.
 
 The app's config gives each module its section, and embeds `fx.Out` so configloader provides each one on its own. Each module's Config is its own type, so no name tags are needed:
 
@@ -287,7 +289,7 @@ A `ProvideMiddleware` or `ProvideRunner` whose name matches no `ProvideServer` f
 
 #### Decorating the Provider
 
-Every server `ProvideServer` provides is built through the app's Provider, so an `fx.Decorate` of the Provider applies to all of them, such as metrics around every server's handler. Pass the build's options on, or the server loses its name on its records:
+Every server `ProvideServer` provides is built through the Provider, so an `fx.Decorate` of the Provider applies to them, such as metrics around every server's handler. fx scopes a decoration to the module that declares it and the modules inside it: declare it at the app's root, or in a module that encloses the `ProvideServer` calls it should reach. A decoration inside a sibling module, such as a `metrics` module next to `api.Module`, reaches no server and reports nothing. Pass the build's options on, or the server loses its name on its records:
 
 ```go
 fx.Decorate(func(p httpserver.Provider, m *Metrics) httpserver.Provider {

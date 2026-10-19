@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 
@@ -13,16 +12,6 @@ import (
 const (
 	serverNames       = `group:"httpserver:server_names"`
 	middlewareTargets = `group:"httpserver:middleware_targets"`
-)
-
-var (
-	// ErrUnknownServer fails startup for a ProvideMiddleware or ProvideRunner naming no server ProvideServer provided.
-	// The error carries the name.
-	ErrUnknownServer = errors.New("unknown server")
-
-	// ErrInvalidName fails startup for a ProvideServer, ProvideMiddleware or ProvideRunner given an empty name, or one
-	// with a character other than a letter, a digit, "-", "_" or ".". The error carries the name.
-	ErrInvalidName = errors.New("invalid server name")
 )
 
 // Module provides the Provider, over the app's *slog.Logger when it has one, and checks at startup that every name

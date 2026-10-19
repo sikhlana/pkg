@@ -1,9 +1,12 @@
 package httpserver_test
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -236,3 +239,78 @@ func TestChainOfOnlyAbsentMiddlewareReturnsTheHandler(t *testing.T) {
 type pointerHandler struct{}
 
 func (*pointerHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}
+
+func TestMiddlewareUnderFx(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain(), "admin": plain()},
+			provide("api", &calls),
+			provide("admin", &calls),
+			httpserver.ProvideMiddleware("api", func() orderedStep { return orderedStep{step{tr, "200"}, 200} }),
+			httpserver.ProvideMiddleware("api", func() orderedStep { return orderedStep{step{tr, "10"}, 10} }),
+			httpserver.ProvideMiddleware("api", func() httpserver.OrderedMiddleware {
+				return httpserver.Ordered(1, orderedStep{step{tr, "100 wrapped as 1"}, 100})
+			}),
+			httpserver.ProvideMiddleware("api", func() step { return step{tr, "undeclared"} }),
+			httpserver.ProvideMiddleware("api", func() step { return step{tr, "undeclared"} }),
+			httpserver.ProvideMiddleware("admin", func() step { return step{tr, "admin only"} }),
+		),
+		httpserver.ProvideRunner("api"),
+		httpserver.ProvideRunner("admin"),
+		probe(func(ctx context.Context, s servers) error {
+			_, _, err := fetch(ctx, s.API.Addr())
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"undeclared", "undeclared", "100 wrapped as 1", "10", "200"}, tr.all(), "not admin only")
+}
+
+func TestConditionalMiddlewareIsLeftOut(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	// Each constructor decides from a condition known only at build time, as one reading the app's config would.
+	conditional := func(enabled bool, label string) func() httpserver.Middleware {
+		return func() httpserver.Middleware {
+			if !enabled {
+				return nil
+			}
+
+			return step{tr, label}
+		}
+	}
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()},
+			provide("api", &calls),
+			httpserver.ProvideMiddleware("api", conditional(true, "enabled")),
+			httpserver.ProvideMiddleware("api", conditional(false, "disabled")),
+			httpserver.ProvideMiddleware("api", func() *pointerStep { return nil }),
+		),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			status, _, err := fetch(ctx, s.API.Addr())
+			if err != nil {
+				return err
+			}
+
+			assert.Equal(t, http.StatusOK, status)
+
+			return nil
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"enabled"}, tr.all())
+}

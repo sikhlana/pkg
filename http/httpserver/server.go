@@ -13,23 +13,6 @@ import (
 	"go.uber.org/fx"
 )
 
-var (
-	// ErrNotListening is returned by Server.Serve on a server that isn't listening: Listen hasn't bound it, or it's
-	// been closed.
-	ErrNotListening = errors.New("server is not listening")
-
-	// ErrAlreadyListening is returned by Server.Listen on a server that has already bound a listener.
-	ErrAlreadyListening = errors.New("server is already listening")
-
-	// ErrAlreadyServing is returned by Server.Serve while another call is serving the same server.
-	ErrAlreadyServing = errors.New("server is already serving")
-
-	// ErrShutdownTimeout is returned by Server.Serve when connections were still active once the shutdown timeout
-	// passed, and were closed. It doesn't match context.DeadlineExceeded, so a run that ended by deadline still
-	// reports the requests it cut.
-	ErrShutdownTimeout = errors.New("shutdown timeout exceeded")
-)
-
 // state is where a Server is in its life: built, listening, serving, then closed.
 type state int
 
@@ -240,9 +223,11 @@ const builtSpec = `name:"httpserver:spec::built"`
 // ProvideServer provides the server name, injectable under NameTag(name), built from the Spec constructor returns.
 // constructor can take any parameters fx can supply, and returns a Spec, optionally followed by an error. ProvideServer
 // wraps the Spec's handler in the middleware in MiddlewareGroup(name), ordered as Chain orders them, then builds the
-// server by calling the app's Provider with WithName(name), so the name is on every record the server logs. A
-// decoration of the Provider applies to the server, and a handler it wraps already runs the middleware. A Spec with a
-// nil handler fails startup with an error matching ErrNilHandler that names the server.
+// server by calling the Provider with WithName(name), so the name is on every record the server logs. fx scopes a
+// decoration to the module that declares it and the modules inside that one, so a decoration of the Provider at the
+// app's root, or in a module enclosing ProvideServer, applies to the server, and a handler it wraps already runs the
+// middleware; one in a sibling module doesn't. A Spec whose handler is nil, or a nil pointer or func, fails startup
+// with an error matching ErrNilHandler, and every failure to build names the server.
 //
 // Providing a server doesn't run it, and nothing is built until something injects it: list ProvideRunner(name) in
 // the commands that serve it. A name provided twice fails startup, and an invalid one with ErrInvalidName.
@@ -262,11 +247,17 @@ func ProvideServer(name string, constructor any, anns ...fx.Annotation) fx.Optio
 		),
 		fx.Provide(fx.Annotate(
 			func(spec Spec, p Provider, mws []Middleware) (*Server, error) {
-				if spec.Handler == nil {
-					return nil, fmt.Errorf("%w: server %q", ErrNilHandler, name)
+				// Checked before Chain, which would wrap a nil handler, and before a decoration of p could hide one.
+				if isNil(spec.Handler) {
+					return nil, fmt.Errorf("building server %q: %w", name, ErrNilHandler)
 				}
 
-				return p(spec.Config, Chain(spec.Handler, mws...), WithName(name))
+				s, err := p(spec.Config, Chain(spec.Handler, mws...), WithName(name))
+				if err != nil {
+					return nil, fmt.Errorf("building server %q: %w", name, err)
+				}
+
+				return s, nil
 			},
 			fx.ParamTags(builtSpec, "", MiddlewareGroup(name)),
 			fx.ResultTags(NameTag(name)),

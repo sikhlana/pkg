@@ -46,3 +46,18 @@ The module is new, so it starts at 0.1.0 with no bump task. No mocked interface 
 - [x] 7.1 In `http/httpserver/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...` plus `go test -race ./...`, then `govulncheck ./...`.
 - [x] 7.2 In `kernel/` and `kernelrun/`: the same chain, since their README edits are their only changes.
 - [x] 7.3 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.1–7.3.
+
+## 8. Code review fixes
+
+See design.md's Fixes from code review.
+
+- [x] 8.1 Close the listener on Serve's failure path, for a `ServeTLS` that fails before serving.
+- [x] 8.2 Decorate the Provider in `ProvideServer`'s module with one over the named logger, so tlsconfig's records and net/http's error log carry `server`.
+- [x] 8.3 Fail startup with `ErrNilServer` for a constructor returning a nil `*Server` without an error.
+- [x] 8.4 Rewrite `MiddlewareGroup`'s godoc and README row to point at `ProvideMiddleware` only.
+- [x] 8.5 Return `ErrShutdownTimeout`, not a wrapped `context.DeadlineExceeded`, when the drain runs out of time.
+- [x] 8.6 Set `BaseContext` to `context.WithoutCancel` of the serve context.
+- [x] 8.7 Return `ErrAlreadyServing` from a second `Serve` while serving.
+- [x] 8.8 README: the timeout note pointing at `http.ResponseController`, and the With fx example rewritten around a module whose Config squashes `httpserver.Config`, with the promoted `Validate` caveat.
+- [x] 8.9 Tests for each fix, and for loading a squashed config with and without a `Validate` of its own; spec and design.md updated.
+- [x] 8.10 Re-run 7.1 and 7.3.

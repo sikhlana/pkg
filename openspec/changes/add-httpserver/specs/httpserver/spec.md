@@ -48,9 +48,13 @@ Building a server SHALL NOT open a socket, and SHALL fail for a nil handler rath
 - **WHEN** a server that is listening is told to listen again
 - **THEN** the second call fails with an error matching the already-listening sentinel, and the first listener keeps serving
 
+#### Scenario: Serving twice
+- **WHEN** a server that is serving is told to serve again
+- **THEN** the second call fails with an error matching the already-serving sentinel, and the first keeps serving
+
 ### Requirement: Servers are named and run only where a command opts in
 
-Under fx, every server SHALL be provided under a name, and a server provided under a name SHALL be injectable by that name. Providing a server SHALL NOT run it. A command SHALL run a named server only when it opts in to that name, and in a command that neither runs nor injects a named server, that server's constructor, its middleware constructors and its TLS files SHALL NOT be touched. A server that is built but not run SHALL NOT bind a socket. A running server's runner SHALL be named `httpserver:<name>`.
+Under fx, every server SHALL be provided under a name, and a server provided under a name SHALL be injectable by that name. Providing a server SHALL NOT run it. A command SHALL run a named server only when it opts in to that name, and in a command that neither runs nor injects a named server, that server's constructor, its middleware constructors and its TLS files SHALL NOT be touched. A server that is built but not run SHALL NOT bind a socket. A running server's runner SHALL be named `httpserver:<name>`. A constructor that returns no server and no error SHALL fail startup with an error matching the nil-server sentinel that names the server.
 
 #### Scenario: Provided for every command, run by one
 - **WHEN** servers `api` and `admin` are provided in options shared by every command, the `serve` command opts in to both, and the `migrate` command opts in to neither
@@ -68,9 +72,13 @@ Under fx, every server SHALL be provided under a name, and a server provided und
 - **WHEN** the running server `api` fails while serving
 - **THEN** the app's error names the runner `httpserver:api`
 
+#### Scenario: A constructor returns no server
+- **WHEN** the constructor for server `api` returns no server and no error, and a command runs `api`
+- **THEN** startup fails with an error matching the nil-server sentinel, naming `api`
+
 ### Requirement: Binding happens at start
 
-A server a command runs SHALL bind its address while the app starts, before any runner runs. A bind failure SHALL fail startup with an error naming the server and the address. Once the app has started, every server it runs SHALL be accepting connections. A server that bound but never served, because a later step of startup failed, SHALL release its socket when the app stops.
+A server a command runs SHALL bind its address while the app starts, before any runner runs. A bind failure SHALL fail startup with an error naming the server and the address. Once the app has started, every server it runs SHALL be accepting connections. A server that bound but never served, because a later step of startup failed, SHALL release its socket when the app stops, and so SHALL a server whose serving fails before it accepts its first connection.
 
 #### Scenario: Accepting once started
 - **WHEN** a command runs server `api` on `127.0.0.1:0` and the app finishes starting
@@ -86,7 +94,7 @@ A server a command runs SHALL bind its address while the app starts, before any 
 
 ### Requirement: Graceful shutdown bounded by shutdown_timeout
 
-When a running server's context ends, it SHALL stop accepting new connections, let in-flight requests finish for up to its shutdown timeout, and then return cleanly. Requests still in flight when the shutdown timeout passes SHALL have their connections closed, and serving SHALL return an error matching `context.DeadlineExceeded`. A server that fails while serving SHALL return that failure, which stops every other runner in the command.
+Requests' contexts SHALL carry the values of the context the server serves with, but SHALL NOT be cancelled when it ends. When a running server's context ends, it SHALL stop accepting new connections, let in-flight requests finish for up to its shutdown timeout, and then return cleanly. Requests still in flight when the shutdown timeout passes SHALL have their connections closed, and serving SHALL return an error matching the shutdown-timeout sentinel, which SHALL NOT match `context.DeadlineExceeded`, so the cut requests are reported as a crash however the run ended. A server that fails while serving SHALL return that failure, which stops every other runner in the command.
 
 #### Scenario: Draining finishes in time
 - **WHEN** a request is in flight, the server's context ends, and the request finishes within the shutdown timeout
@@ -94,7 +102,11 @@ When a running server's context ends, it SHALL stop accepting new connections, l
 
 #### Scenario: Draining runs out of time
 - **WHEN** a request is still in flight when the shutdown timeout passes
-- **THEN** its connection is closed and serving returns an error matching `context.DeadlineExceeded`
+- **THEN** its connection is closed and serving returns an error matching the shutdown-timeout sentinel and not `context.DeadlineExceeded`
+
+#### Scenario: Requests see the serve context's values
+- **WHEN** the context a server serves with carries a value, and a request is in flight when that context ends
+- **THEN** the request's context carries the value and isn't cancelled, and the request completes
 
 #### Scenario: One server failing stops the other
 - **WHEN** a command runs servers `api` and `admin`, and `admin`'s listener fails while serving
@@ -170,7 +182,7 @@ Providing middleware for a name, or opting a command in to running a name, when 
 
 ### Requirement: Logging through the injected logger
 
-A server SHALL log through the injected logger, with the server's name on every record it logs under fx. It SHALL log at Info when it starts listening, with the bound address, and when it starts draining. net/http's own error reports, such as a failed TLS handshake, SHALL be logged at Debug through the injected logger, and SHALL NOT be written through the standard library's `log` package.
+A server SHALL log through the injected logger, with the server's name on every record it logs under fx, tlsconfig's records about its key pair and client CAs included. It SHALL log at Info when it starts listening, with the bound address, and when it starts draining. net/http's own error reports, such as a failed TLS handshake, SHALL be logged at Debug through the injected logger, and SHALL NOT be written through the standard library's `log` package.
 
 #### Scenario: Listening
 - **WHEN** server `api` binds `127.0.0.1:0`
@@ -179,3 +191,7 @@ A server SHALL log through the injected logger, with the server's name on every 
 #### Scenario: A failed handshake
 - **WHEN** a client sends plaintext to a server with TLS enabled
 - **THEN** a Debug record from the injected logger names the server and the handshake error, and nothing is written to the standard library's log output
+
+#### Scenario: Key pair records name the server
+- **WHEN** server `api` is built under fx with TLS enabled
+- **THEN** tlsconfig's record of loading the key pair names the server `api`

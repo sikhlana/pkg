@@ -86,7 +86,7 @@ Found while implementing: fx can't annotate a constructor twice, and `kernelrun.
 |---|---|---|---|
 | built | binds → listening | ErrNotListening | no-op |
 | listening | ErrAlreadyListening | serves → serving | closes the listener → closed |
-| serving | ErrAlreadyListening | ErrAlreadyListening | no-op: Serve owns the listener |
+| serving | ErrAlreadyListening | ErrAlreadyServing | no-op: Serve owns the listener |
 | closed | ErrAlreadyListening | ErrNotListening | no-op |
 
 Once `Serve` returns, the server moves to closed, so a second `Serve` fails with `ErrNotListening` (found while implementing; the table's serving row covers only a call made while the first is running). A listener failure while serving also closes every remaining connection, since nothing else will. A mutex guards the state; Server takes pointer receivers. `Addr()` returns the bound address, or nil before Listen. A Server isn't reusable after Close: an app builds a new one.
@@ -147,7 +147,7 @@ The `tls.Config` is built in the Provider, so a bad key pair fails the build, wh
 
 ### 9. Logging
 
-The Provider's logger is the injected one; `ProvideServer` adds `slog.String("server", name)`. Records: Info `http server listening` with `address` on Listen, Info `http server draining` when the context ends, Debug `http server stopped` after a clean drain. `http.Server.ErrorLog` is `slog.NewLogLogger(handler, slog.LevelDebug)` over the named logger, so handshake failures from scanners don't fill the logs. The trade-off: net/http's report of a panicking handler also lands at Debug. A recovery middleware is the answer, and the README says so.
+The Provider's logger is the injected one; inside `ProvideServer`, the constructor's Provider is decorated with one over `logger.With(slog.String("server", name))` (see Fixes from code review). Records: Info `http server listening` with `address` on Listen, Info `http server draining` when the context ends, Debug `http server stopped` after a clean drain. `http.Server.ErrorLog` is `slog.NewLogLogger(handler, slog.LevelDebug)` over the named logger, so handshake failures from scanners don't fill the logs. The trade-off: net/http's report of a panicking handler also lands at Debug. A recovery middleware is the answer, and the README says so.
 
 ### 10. Constitution amendments
 
@@ -163,14 +163,29 @@ Decisions 3 (why the runner owns the lifecycle, and why the Provider must not ap
 - [Equal orders run in a different order between starts] → Documented in the README and spec; an order-sensitive middleware declares an order or is given one with `Ordered`.
 - [A panicking handler is only reported at Debug without a recovery middleware] → README recommends one at a low order.
 - [A shutdown that runs out of time is reported as a crash, so the process exits non-zero after a SIGTERM] → Intended: dropped requests are worth hearing about. The README tells operators to keep `shutdown_timeout` below the orchestrator's grace period, so the drain finishes before a SIGKILL.
-- [`ProvideServer`'s constructor can still build a server through the Provider with the wrong name's Config] → The tag is on the result, not the Config; the README shows tagged Config fields in the app config so each constructor asks for its own.
+- [`ProvideServer`'s constructor can still build a server through the Provider with the wrong name's Config] → The tag is on the result, not the Config; the README's example gives each module its own Config type embedding `httpserver.Config`, so each constructor asks for its own section without tags.
 - [A config that forgets `port` listens on a random port] → Accepted with separate `host` and `port` (decision 8); the README says to set the port explicitly.
 
 ## Open after apply
 
-- tlsconfig's own records (key pair loaded, rotated, refresh failed) don't carry the `server` attribute: the Provider builds the TLS configuration before `ProvideServer` names the server, and the Provider takes no name by design. They carry the file paths instead.
 - `config/configloader` is a test-only requirement, for the load-through-configloader scenarios, so viper appears in the module graph (not the build) of consumers.
 - govulncheck reports GO-2026-5932 (golang.org/x/crypto/openpgp) at module level only, through configvalidator's indirect requirement; no code calls it.
+
+## Fixes from code review
+
+A review of the branch against `origin/main` found these; each fix has a test that fails without it.
+
+- **A TLS listener leaked when `ServeTLS` failed before serving.** `ServeTLS` can return before handing the listener to `http.Server.Serve`, whose deferred close is what releases it, and the state was already closed, so the OnStop `Close` did nothing. Serve's failure path now closes the listener itself. Practically unreachable through tlsconfig, but cheap.
+- **tlsconfig's records and net/http's error log didn't name the server.** `ProvideServer` named the server's logger after the Provider had built the TLS configuration with the unnamed one. Now `ProvideServer`'s module decorates the Provider its constructor receives with one over the named logger, so every record from the build on carries `server`. The decorated Provider replaces the app's for that constructor, so a decoration of the app's Provider doesn't reach it; nothing in the repo decorates it, and the godoc says so. The decorator takes the app's Provider, unused, so `Module` stays required. (Replaces the open item about tlsconfig's records.)
+- **A constructor returning `(nil, nil)` panicked.** `ProvideServer` now fails startup with `ErrNilServer`, naming the server.
+- **`MiddlewareGroup`'s godoc suggested a route that skipped the name check.** Registering into the group directly never supplies the target name, so a typo went silently unserved. The godoc and README now say to add with `ProvideMiddleware` only.
+- **A drain timeout's verdict depended on how the run ended.** kernelrun counts an error matching the run context's error as clean, and the drain's error wrapped `context.DeadlineExceeded`, so a run ended by deadline counted cut requests as clean. Serve now returns `ErrShutdownTimeout`, which doesn't match it. Spec scenario updated.
+- **Handlers didn't see the serve context's values.** The `http.Server` now has a `BaseContext` of `context.WithoutCancel(ctx)`, matching what the drain already used: values pass through, cancellation doesn't, so ending the context drains requests rather than cancelling them.
+- **A second `Serve` while serving returned `ErrAlreadyListening`,** which reads like a bind problem. It returns the new `ErrAlreadyServing`.
+- **Timeouts can't be turned off.** Kept: zero means the default, so every server bounds slow clients. The README points streaming and upload handlers at `http.ResponseController`'s per-request deadlines.
+- **The TLS section is validated twice per build,** by the Provider's `configvalidator.Validate` and again inside `TLSConfig`. Kept: the constitution has Provider closures validate the Config they're handed, `TLSConfig` validates by contract, and the cost is negligible.
+
+The README's With fx example now shows a module that owns its server, with a Config embedding `httpserver.Config` under `mapstructure:",squash"`, and explains that the embed promotes `Validate`. Tests load such a config through configloader, with and without a `Validate` of the module's own.
 
 ## Migration Plan
 

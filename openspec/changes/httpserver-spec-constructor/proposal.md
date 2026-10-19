@@ -27,5 +27,5 @@ None.
 - **`http/httpserver`:** exported API changes: `Spec`, `Option` and `WithName` added; `Provider`'s signature and `ProvideServer`'s constructor contract change; `ErrNilServer` removed. Minor bump to 0.2.0, with `!`. No other module uses it yet.
 - **No new dependencies.**
 - **Docs and repo files:** httpserver's README (the With fx and Standalone examples, the decoration and middleware-order note, the members table), `docs/http.md` ("Every record names its server" loses its caveat), `openspec/config.yaml` (the named-instance build rule).
-- **`kernel`, `log`, `telemetry`:** files split by idea under the constitution's new file-per-idea rule (design decision 5), with no API change; patch bumps to 0.3.2, 0.1.2 and 0.1.2.
-- **Release:** one pull request; merging publishes `http/httpserver/v0.2.0`, `kernel/v0.3.2`, `log/v0.1.2` and `telemetry/v0.1.2`.
+- **Every other module but `url/urlmask`:** files split by idea, sentinels moved to `errors.go`, `ProvideX`/`WithX`/`AsX` beside their idea and tests beside their file, under the constitution's file-per-idea rule (design decisions 5 and 6), with no API or behaviour change: patch bumps for `cli` (0.3.1), `config/configloader` (0.1.4), `config/configvalidator` (0.1.3), `kernel` (0.3.2), `kernelrun` (0.3.1), `log` (0.1.2), `telemetry` (0.1.2) and `tls/tlsconfig` (0.1.1). `tools/release` is split the same way, unreleased.
+- **Release:** one pull request; merging publishes `http/httpserver/v0.2.0` and the patch releases above.

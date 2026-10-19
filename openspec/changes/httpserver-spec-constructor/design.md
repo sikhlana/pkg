@@ -90,6 +90,25 @@ Brought forward during apply (task 3.4): that section described the decorator th
 
 Review found `httpserver.go` crowded once the Provider gained options, so the package now splits by idea: `server.go` (the Server, `Spec`, `NameTag`, `ProvideServer`), `provider.go` (`Provider`, `ProviderParams`, `NewProvider`, `ErrNilHandler`), `options.go` (`Option`, `WithName`), `middleware.go` (gaining `MiddlewareGroup` and `ProvideMiddleware`) and `runner.go`. `module.go` keeps `Module`, the name check and the errors shared across helpers. An idea's `ProvideX` lives with the idea rather than in `module.go`, and a Params struct stays beside its constructor; the constitution gains the rule. No exported API changes. A scan of the other modules found four places out of line with the rule, and this branch fixes them too, each a refactor with a patch bump and no API change: kernel's flags move to `flags.go`; log's `Format` moves to `format.go` and its `MiddlewareGroup`, `WithMiddleware` and `ProvideMiddleware` from `module.go` to `middleware.go`; telemetry's `telemetry.go` becomes `resource.go` and `propagator.go`; and telemetry/trace's protocols and exporters move to `exporter.go`, with the `Config` sampler resolvers going to `config.go` beside `Sampler`. Tests follow where a test file mixed ideas (httpserver's, and telemetry's resource, propagator and error-sink tests); tests that exercise a package through its main entry point (kernel's App, trace's `New`) stay where they are. kernelrun already fits: `kernelrun.go` is `Run`, and `runner.go` is the `Runner` with its helpers.
 
+### 6. The rule reworded, and applied everywhere (added during review)
+
+Review found the first wording ambiguous and the split incomplete. The constitution now says: `<package>.go` holds the entry point (New, Run, Load) or only the doc; an idea's `ProvideX`, `WithX` and `AsX` live in `x.go` when it exists, and a small idea's helpers stay in `module.go`; every exported sentinel lives in `errors.go` (a single-file package excepted), so failure modes are listed in one place and an error doesn't move when a second idea uses it; and tests follow the file they test, with `helpers_test.go`/`export_test.go` for plumbing and end-to-end entry-point tests in `<package>_test.go`. Applied to every module and to tools/release, each a pure move checked by comparing every non-import line before and after (tlsconfig's Validate tests, which shared subtests with the TLSConfig tests, were split out with every assertion kept). `url/urlmask` was already in line. A mechanical scan afterwards found no sentinel outside `errors.go`, no helper in `module.go` whose idea has a file, and no test file without its source but the two generated mocks.
+
+## Fixes from code review
+
+A high-effort review of the branch found these; each fix has a test that fails without it:
+
+- **A typed-nil handler got past the nil check.** `spec.Handler == nil` missed a nil `*Handler` or nil `HandlerFunc` behind the interface, starting a server that panics on every request (logged only at Debug). `ProvideServer` and the Provider now use `isNil`, the reflection check `Chain` already used for middleware.
+- **"A decoration applies to every server" overstated it.** fx scopes `fx.Decorate` to the declaring module and the modules inside it, so a decoration in a sibling module (a `metrics` module beside `api.Module`) reaches no server and reports nothing. The godoc, README and `docs/http.md` now say to declare it at the root or in an enclosing module, and tests pin both cases. The spec's requirement says the same.
+- **Only the nil-handler failure named the server.** Every error from building through the Provider is now wrapped as `building server %q: %w`, so a missing key file on `admin` says so.
+- **A nil `Option` panicked** inside `NewProvider`; it's skipped.
+- **A constructor returning `*Spec`** failed with a missing type naming the private tag; the README says to return a value.
+
+## Open after apply
+
+- One server can't be built differently from the others (its own logger, say): the constructor no longer touches the Provider. A `Spec.Options []Option` field, appended after `WithName`, would allow it; left until someone needs it.
+- configvalidator and telemetry have no package doc; the rule's `<package>.go` would carry one when written.
+
 ## Risks / Trade-offs
 
 - [The breaking change] → httpserver is at 0.1.0 with no known consumer; a minor bump with `!`.

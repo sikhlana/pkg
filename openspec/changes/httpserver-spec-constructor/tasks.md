@@ -52,4 +52,4 @@ See design.md's decision 6.
 - [x] 7.1 `openspec/config.yaml`: entry point or doc in `<package>.go`, helpers in `x.go` when it exists, sentinels in `errors.go`, tests beside their file.
 - [x] 7.2 httpserver: sentinels to `errors.go`; `module_test.go` split into `runner_test.go`, `server_test.go`, `middleware_test.go`, with the fx test helpers in `helpers_test.go` and the `WithName` test in `options_test.go`.
 - [x] 7.3 cli (0.3.1), kernel (0.3.2), kernelrun (0.3.1), config/configloader (0.1.4), config/configvalidator (0.1.3), log (0.1.2), telemetry (0.1.2), tls/tlsconfig (0.1.1), and tools/release: split by the rule, each checked as a pure move.
-- [ ] 7.4 Verification chain on every touched module (tools/release with `GOWORK=off`), the short sweep, and the release tool's `check --base origin/main`.
+- [x] 7.4 Verification chain on every touched module (tools/release with `GOWORK=off`), the short sweep, and the release tool's `check --base origin/main`.

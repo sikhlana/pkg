@@ -1,3 +1,5 @@
+// Package runerr carries a run's outcome on the context kernelrun hands its OnStop hooks, so a hook can tell a clean
+// run from a crash, or from a start that failed.
 package runerr
 
 import (

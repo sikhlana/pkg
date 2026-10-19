@@ -1,3 +1,6 @@
+// Package kernelrun runs an fx app's named runners between its start and stop: the first runner to return stops the
+// rest, every ending stops the app through its OnStop hooks, and those hooks learn from runerr whether the run crashed.
+// Loop modules import it to register their runners without pulling in cobra, viper or log.
 package kernelrun
 
 import (

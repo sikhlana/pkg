@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	// ErrNilHandler is returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux.
+	// ErrNilHandler is returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux, and fails
+	// startup for a ProvideServer constructor whose Spec has none, naming the server.
 	ErrNilHandler = errors.New("nil handler")
 
 	// ErrNotListening is returned by Server.Serve on a server that isn't listening: Listen hasn't bound it, or it's

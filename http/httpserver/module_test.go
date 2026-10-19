@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -42,12 +43,12 @@ func plain() httpserver.Config {
 
 // provide provides the server name, answering with its own name, and counts its constructor's calls in calls.
 func provide(name string, calls *atomic.Int32) fx.Option {
-	return httpserver.ProvideServer(name, func(p httpserver.Provider, c configs) (*httpserver.Server, error) {
+	return httpserver.ProvideServer(name, func(c configs) httpserver.Spec {
 		calls.Add(1)
 
-		return p(c[name], http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		return httpserver.Spec{Config: c[name], Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, name)
-		}))
+		})}
 	})
 }
 
@@ -421,20 +422,37 @@ func TestRecordsCarryTheServerName(t *testing.T) {
 	assert.Equal(t, "api", loaded.Attrs["server"], "tlsconfig's records carry the name too")
 }
 
-func TestNilServerFailsStartup(t *testing.T) {
+func TestNilHandlerFailsStartup(t *testing.T) {
 	t.Parallel()
 
 	err := run(t,
 		shared(slog.New(slog.DiscardHandler), configs{},
-			httpserver.ProvideServer("api", func() (*httpserver.Server, error) {
-				return nil, nil //nolint:nilnil // the misuse under test
+			httpserver.ProvideServer("api", func() httpserver.Spec {
+				return httpserver.Spec{Config: plain()}
 			}),
 		),
 		httpserver.ProvideRunner("api"),
 	)
 
-	require.ErrorIs(t, err, httpserver.ErrNilServer)
-	assert.Contains(t, err.Error(), `"api"`)
+	require.ErrorIs(t, err, httpserver.ErrNilHandler)
+	assert.Contains(t, err.Error(), `server "api"`)
+}
+
+func TestConstructorErrorFailsStartup(t *testing.T) {
+	t.Parallel()
+
+	errHandler := errors.New("handler unavailable")
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{},
+			httpserver.ProvideServer("api", func() (httpserver.Spec, error) {
+				return httpserver.Spec{}, errHandler
+			}),
+		),
+		httpserver.ProvideRunner("api"),
+	)
+
+	require.ErrorIs(t, err, errHandler)
 }
 
 // handshakeRecord returns net/http's record of a failed TLS handshake, or nil.
@@ -510,8 +528,8 @@ func TestInvalidNamesFailStartup(t *testing.T) {
 
 	helpers := map[string]func(name string) fx.Option{
 		"ProvideServer": func(name string) fx.Option {
-			return httpserver.ProvideServer(name, func() (*httpserver.Server, error) {
-				return nil, errors.New("never built")
+			return httpserver.ProvideServer(name, func() (httpserver.Spec, error) {
+				return httpserver.Spec{}, errors.New("never built")
 			})
 		},
 		"ProvideMiddleware": func(name string) fx.Option {
@@ -558,9 +576,9 @@ func TestProvideServerAndMiddlewareForwardAnnotations(t *testing.T) {
 		fx.Supply(slog.New(slog.DiscardHandler)),
 		fx.Supply(fx.Annotate(plain(), fx.ResultTags(`name:"api"`))),
 		fx.Supply(fx.Annotate("tagged", fx.ResultTags(`name:"label"`))),
-		httpserver.ProvideServer("api", func(p httpserver.Provider, c httpserver.Config) (*httpserver.Server, error) {
-			return p(c, ok)
-		}, fx.ParamTags("", `name:"api"`)),
+		httpserver.ProvideServer("api", func(c httpserver.Config) httpserver.Spec {
+			return httpserver.Spec{Config: c, Handler: ok}
+		}, fx.ParamTags(`name:"api"`)),
 		httpserver.ProvideMiddleware("api", func(label string) step {
 			return step{tr, label}
 		}, fx.ParamTags(`name:"label"`)),
@@ -574,4 +592,110 @@ func TestProvideServerAndMiddlewareForwardAnnotations(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"tagged"}, tr.all())
+}
+
+// statusWriter remembers the status a handler wrote.
+type statusWriter struct {
+	http.ResponseWriter
+
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+// recording decorates the app's Provider, as an app adding metrics would: it wraps every server's handler to record
+// each response's status in tr, and passes the build's options on.
+func recording(tr *trail) fx.Option {
+	return fx.Decorate(func(p httpserver.Provider) httpserver.Provider {
+		return func(cfg httpserver.Config, h http.Handler, opts ...httpserver.Option) (*httpserver.Server, error) {
+			return p(cfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+				h.ServeHTTP(sw, r)
+				tr.add(strconv.Itoa(sw.status))
+			}), opts...)
+		}
+	})
+}
+
+func TestADecorationOfTheProviderReachesEveryServer(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain(), "admin": plain()},
+			provide("api", &calls),
+			provide("admin", &calls),
+			recording(tr),
+		),
+		httpserver.ProvideRunner("api"),
+		httpserver.ProvideRunner("admin"),
+		probe(func(ctx context.Context, s servers) error {
+			if _, _, err := fetch(ctx, s.API.Addr()); err != nil {
+				return err
+			}
+
+			_, _, err := fetch(ctx, s.Admin.Addr())
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"200", "200"}, tr.all(), "one request to each server")
+}
+
+func TestADecorationWrapsOutsideTheMiddleware(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()},
+			provide("api", &calls),
+			httpserver.ProvideMiddleware("api", func() httpserver.Middleware {
+				return httpserver.MiddlewareFunc(func(w http.ResponseWriter, _ *http.Request, _ http.Handler) {
+					w.WriteHeader(http.StatusUnauthorized)
+				})
+			}),
+			recording(tr),
+		),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			status, _, err := fetch(ctx, s.API.Addr())
+			assert.Equal(t, http.StatusUnauthorized, status)
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"401"}, tr.all(), "the decoration saw the request the middleware answered")
+}
+
+func TestTheNameSurvivesADecoration(t *testing.T) {
+	t.Parallel()
+
+	rec := newRecorder()
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(rec), configs{"api": plain()}, provide("api", &calls), recording(&trail{})),
+		httpserver.ProvideRunner("api"),
+		probe(func(context.Context, servers) error { return nil }),
+	)
+
+	require.NoError(t, err)
+
+	listening, found := rec.find("http server listening")
+	require.True(t, found)
+	assert.Equal(t, "api", listening.Attrs["server"])
 }

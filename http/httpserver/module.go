@@ -3,14 +3,14 @@ package httpserver
 import (
 	"errors"
 	"fmt"
-	"log/slog"
+	"net/http"
 	"slices"
 
 	"go.uber.org/fx"
 )
 
-// builtServer names a ProvideServer constructor's result inside the private module that wraps it in its middleware.
-const builtServer = `name:"httpserver:server::built"`
+// builtSpec names a ProvideServer constructor's result inside the private module that builds the server from it.
+const builtSpec = `name:"httpserver:spec::built"`
 
 // serverNames and middlewareTargets carry the names ProvideServer and ProvideMiddleware were given, for Module's
 // check. They're strings, so collecting them builds nothing.
@@ -23,10 +23,6 @@ var (
 	// ErrUnknownServer fails startup for a ProvideMiddleware or ProvideRunner naming no server ProvideServer provided.
 	// The error carries the name.
 	ErrUnknownServer = errors.New("unknown server")
-
-	// ErrNilServer fails startup when a ProvideServer constructor returns a nil *Server without an error. The error
-	// carries the name.
-	ErrNilServer = errors.New("nil server")
 
 	// ErrInvalidName fails startup for a ProvideServer, ProvideMiddleware or ProvideRunner given an empty name, or one
 	// with a character other than a letter, a digit, "-", "_" or ".". The error carries the name.
@@ -49,13 +45,10 @@ type namesParams struct {
 	Targets []string `group:"httpserver:middleware_targets"`
 }
 
-// namedProviderParams is the input of the decorator that names a ProvideServer constructor's Provider.
-type namedProviderParams struct {
-	fx.In
-
-	// Provider is the app's, which the decorator replaces; taking it keeps Module required.
-	Provider Provider
-	Logger   *slog.Logger `optional:"true"`
+// Spec is what a ProvideServer constructor says the server serves: its Config and its handler.
+type Spec struct {
+	Config  Config
+	Handler http.Handler
 }
 
 // NameTag returns the fx name tag ProvideServer provides the server name under, for injecting it with fx.ParamTags or
@@ -71,14 +64,12 @@ func MiddlewareGroup(name string) string {
 	return fmt.Sprintf(`group:"httpserver:middleware:%s"`, name)
 }
 
-// ProvideServer provides the *Server that constructor builds as the server name, injectable under NameTag(name).
-// constructor can take any parameters fx can supply, typically the Provider, a Config and a handler, and returns a
-// *Server and optionally an error. The server's handler is wrapped in the middleware in MiddlewareGroup(name), ordered
-// as Chain orders them. The Provider constructor receives logs with the name as the server attribute, so the server's
-// records, net/http's error reports and tlsconfig's key pair records all carry it; it replaces the app's Provider for
-// constructor alone, so a decoration of the app's Provider doesn't reach it. constructor returns a server of its own,
-// built for this name: ProvideServer wraps its handler in place. A nil *Server without an error fails startup with
-// ErrNilServer.
+// ProvideServer provides the server name, injectable under NameTag(name), built from the Spec constructor returns.
+// constructor can take any parameters fx can supply, and returns a Spec, optionally followed by an error. ProvideServer
+// wraps the Spec's handler in the middleware in MiddlewareGroup(name), ordered as Chain orders them, then builds the
+// server by calling the app's Provider with WithName(name), so the name is on every record the server logs. A
+// decoration of the Provider applies to the server, and a handler it wraps already runs the middleware. A Spec with a
+// nil handler fails startup with an error matching ErrNilHandler that names the server.
 //
 // Providing a server doesn't run it, and nothing is built until something injects it: list ProvideRunner(name) in
 // the commands that serve it. A name provided twice fails startup, and an invalid one with ErrInvalidName.
@@ -92,28 +83,19 @@ func ProvideServer(name string, constructor any, anns ...fx.Annotation) fx.Optio
 
 	return fx.Module(
 		"httpserver",
-		fx.Decorate(func(p namedProviderParams) Provider {
-			if p.Logger == nil {
-				return NewProvider(ProviderParams{})
-			}
-
-			return NewProvider(ProviderParams{Logger: p.Logger.With(slog.String("server", name))})
-		}),
 		fx.Provide(
 			fx.Private,
-			fx.Annotate(constructor, append([]fx.Annotation{fx.ResultTags(builtServer)}, anns...)...),
+			fx.Annotate(constructor, append([]fx.Annotation{fx.ResultTags(builtSpec)}, anns...)...),
 		),
 		fx.Provide(fx.Annotate(
-			func(s *Server, mws []Middleware) (*Server, error) {
-				if s == nil {
-					return nil, fmt.Errorf("%w: %q", ErrNilServer, name)
+			func(spec Spec, p Provider, mws []Middleware) (*Server, error) {
+				if spec.Handler == nil {
+					return nil, fmt.Errorf("%w: server %q", ErrNilHandler, name)
 				}
 
-				s.handler = Chain(s.handler, mws...)
-
-				return s, nil
+				return p(spec.Config, Chain(spec.Handler, mws...), WithName(name))
 			},
-			fx.ParamTags(builtServer, MiddlewareGroup(name)),
+			fx.ParamTags(builtSpec, "", MiddlewareGroup(name)),
 			fx.ResultTags(NameTag(name)),
 		)),
 		fx.Supply(fx.Annotate(name, fx.ResultTags(serverNames))),

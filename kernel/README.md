@@ -49,6 +49,7 @@ import (
 
 	"github.com/sikhlana/pkg/cli"
 	"github.com/sikhlana/pkg/config/configloader"
+	"github.com/sikhlana/pkg/http/httpserver"
 	"github.com/sikhlana/pkg/kernel"
 	"github.com/sikhlana/pkg/kernelrun"
 	"github.com/sikhlana/pkg/log"
@@ -64,13 +65,14 @@ func root() *cobra.Command {
 		Config: func(path string) fx.Option {
 			return configloader.Provide(configloader.Options[Config]{Name: "mytool", Filename: path})
 		},
+		Shared: fx.Options(httpserver.Module, httpserver.ProvideServer("api", newAPIServer)),
 	})
 
 	cmd := app.RootCommand("mytool", "Does my thing")
 
 	cmd.AddCommand(
 		cli.NewVersionCommand(),
-		app.Command("serve", "Serve the API", httpserver.Module, httpserver.ProvideRunner()),
+		app.Command("serve", "Serve the API", httpserver.ProvideRunner("api")),
 		app.Command("check", "Check the config", kernelrun.WithRunner("check", func(context.Context) error {
 			return nil
 		})),

@@ -47,7 +47,7 @@ http/httpserver/            module github.com/sikhlana/pkg/http/httpserver
 └── *_test.go
 ```
 
-Package `httpserver`, fx.Module name `httpserver`. Tags: `name:"httpserver:server:<name>"` for a server, `group:"httpserver:middleware:<name>"` for its middleware. Two unexported groups carry names for the check in decision 7.
+Package `httpserver`, fx.Module name `httpserver`. Tags: `name:"httpserver:server:<name>"` for a server, `group:"httpserver:middleware:<name>"` for its middleware. The constructor's result, before its middleware is applied, is `name:"httpserver:server::built"`, an action segment set off by a double colon. Two unexported groups carry names for the check in decision 7.
 
 ### 2. Exposure: a Provider, with ProvideServer tagging by name
 
@@ -153,6 +153,9 @@ The Provider's logger is the injected one; inside `ProvideServer`, the construct
 
 - **Named instances.** The run-loop rule's `ProvideRunner()` with `DefaultRunnerName` stays for singletons. A module whose loops are named instances takes the name, `ProvideRunner(name)`, and registers as `<module>:<name>`.
 - **Per-name groups.** A group keyed by an instance name can't be a constant, so it's exposed as a function returning its tag, `MiddlewareGroup(name)`, beside its typed `ProvideX` helper and its collector, as name tags already are with `NameTag(name)`.
+- **Action segments.** Added after the second review: a segment naming an action done to the value (built, wired, supplied) is separated by a double colon, `name:"<module>:<purpose>::<action>"`. Applied to kernelrun's and log's built tags and telemetry/trace's wired and supplied tags, which each take a patch bump.
+- **Instance names.** Non-empty, letters, digits, `-`, `_` and `.`, checked by every helper taking one, failing startup through `fx.Error` with `ErrInvalidName`. Names can't hold `:`, so they can't produce an action segment.
+- **Positional parameters.** The single-Params rule's exception: a constructor whose tags depend on an instance name given at wiring time takes positional parameters with `fx.ParamTags`.
 
 ### Rollup into docs/http.md at archive
 
@@ -170,6 +173,7 @@ Decisions 3 (why the runner owns the lifecycle, and why the Provider must not ap
 
 - `config/configloader` is a test-only requirement, for the load-through-configloader scenarios, so viper appears in the module graph (not the build) of consumers.
 - govulncheck reports GO-2026-5932 (golang.org/x/crypto/openpgp) at module level only, through configvalidator's indirect requirement; no code calls it.
+- kernelrun.ProvideRunner annotates its constructor itself, and fx can't annotate a constructor twice, so a named-instance runner can't put its name tag on kernelrun's constructor. httpserver works around it with a private `runnerServer` adapter; every later named-instance module would copy it. A follow-up change could let kernelrun.ProvideRunner take `fx.ParamTags`.
 
 ## Fixes from code review
 
@@ -186,6 +190,17 @@ A review of the branch against `origin/main` found these; each fix has a test th
 - **The TLS section is validated twice per build,** by the Provider's `configvalidator.Validate` and again inside `TLSConfig`. Kept: the constitution has Provider closures validate the Config they're handed, `TLSConfig` validates by contract, and the cost is negligible.
 
 The README's With fx example now shows a module that owns its server, with a Config embedding `httpserver.Config` under `mapstructure:",squash"`, and explains that the embed promotes `Validate`. Tests load such a config through configloader, with and without a `Validate` of the module's own.
+
+## Fixes from the second code review
+
+- **A server named `built` made a dependency cycle.** The constructor's private result tag was `name:"httpserver:server:built"`, exactly `NameTag("built")`. It's now `httpserver:server::built`, and the constitution's action-segment rule keeps every such tag apart from names built from instance names.
+- **A nil middleware failed every request.** First fixed by failing startup with `ErrNilMiddleware` and panicking in `Chain`; then reversed in discussion, because fx keeps nil values in a group and a constructor is the only place a condition from the loaded config can decide whether a middleware applies. `Chain`, which `ProvideServer` uses, now leaves out a nil `Middleware`, a nil pointer, func, map, slice or channel behind one (checked once per middleware with `reflect`, at build), and either wrapped by `Ordered`, so `return nil` is the documented way to leave a middleware out. A nil pointer whose methods would have worked is left out too: returning one almost always means none. Rejected alternatives: a pass-through middleware (a hop per request, intent hidden) and a `flatten` group returning `[]Middleware` (a second helper for the same job).
+- **Default timeouts cap TLS handshakes at 1s.** net/http bounds a handshake by the smallest positive of read_header_timeout, read_timeout and write_timeout (confirmed in the installed toolchain's `tlsHandshakeTimeout`). Kept the 1s default and documented it in the README and `ReadHeaderTimeout`'s godoc.
+- **A listener failure racing the context could wait out a full drain.** Serve now runs the drain through `context.AfterFunc` and, on a serve failure, closes the listener and server before waiting for a drain that started meanwhile, which ends it at once, and joins whatever that drain returned into the serve error. Not covered by a test: the race can't be forced from outside.
+- **Names weren't validated.** `ErrInvalidName` for empty names and characters outside letters, digits, `-`, `_` and `.`, in all three helpers.
+- **The runner's constructor took positional parameters** without needing to; it takes `runnerParams`. The two constructors whose tags depend on the name stay positional, under the constitution's new exception.
+- **kernelrun's README example didn't compile.** Rewritten as a self-contained singleton runner with a `RunnerParams` struct, pointing at httpserver for named instances.
+- **ProvideServer wraps the constructor's server in place.** Kept; the godoc says the constructor returns a server of its own.
 
 ## Migration Plan
 

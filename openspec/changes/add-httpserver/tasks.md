@@ -61,3 +61,19 @@ See design.md's Fixes from code review.
 - [x] 8.8 README: the timeout note pointing at `http.ResponseController`, and the With fx example rewritten around a module whose Config squashes `httpserver.Config`, with the promoted `Validate` caveat.
 - [x] 8.9 Tests for each fix, and for loading a squashed config with and without a `Validate` of its own; spec and design.md updated.
 - [x] 8.10 Re-run 7.1 and 7.3.
+
+## 9. Second code review fixes
+
+See design.md's Fixes from the second code review.
+
+- [x] 9.1 Constitution: the action-segment rule, instance-name validation, and the positional-parameter exception.
+- [x] 9.2 Rename the built tags (`httpserver:server::built`, `kernelrun:runner::built`, `log:middleware::built`) and telemetry/trace's (`exporter::wired`, `provider::supplied`).
+- [x] 9.3 Bump `log/VERSION` (patch) and `telemetry/VERSION` (patch) for their tag renames; kernelrun's patch bump in 6.7 covers its rename.
+- [x] 9.4 `Chain` leaving out absent middleware (nil, typed nil through `reflect`, and either inside `Ordered`), which `ProvideServer` gets through it; `ErrNilMiddleware` and `Chain`'s panic, added first, removed.
+- [x] 9.5 `ErrInvalidName` and its check in `ProvideServer`, `ProvideMiddleware` and `ProvideRunner`.
+- [x] 9.6 Serve's drain through `context.AfterFunc`, closing before waiting on a serve failure.
+- [x] 9.7 `runnerParams` for the runner's constructor.
+- [x] 9.8 Document the TLS handshake timeout in the README and `ReadHeaderTimeout`'s godoc; README rows for the new sentinels and `Chain`'s panic.
+- [x] 9.9 Rewrite kernelrun's README loop-module example.
+- [x] 9.10 Tests: a server named `built`, conditional and typed-nil middleware left out under fx and through `Chain`, invalid and valid names; spec and design.md updated.
+- [x] 9.11 Verification chain on http/httpserver, kernelrun, log and telemetry, then the short sweep.

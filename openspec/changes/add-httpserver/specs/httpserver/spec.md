@@ -134,7 +134,11 @@ With TLS enabled, a server SHALL serve TLS using the `tls.Config` tlsconfig buil
 
 ### Requirement: Middleware runs in order around the handler
 
-A named server's handler SHALL be wrapped in every middleware provided for that name, and in no other server's. Middleware SHALL run from the lowest order, outermost, to the highest, innermost, with the handler inside them all. A middleware that declares an order SHALL use it, one wrapped with an order at wiring time SHALL use that order instead of its own, and any other SHALL count as order 0. Middleware with equal orders SHALL run in an unspecified relative order, and SHALL NOT fail startup. Each middleware SHALL receive, as the next handler, the rest of the chain for its position: built once, the same for every request, and safe for concurrent use. A middleware that doesn't call the next handler SHALL end the request there. A middleware constructor SHALL run only when its server is built. The same ordering SHALL apply to a chain built by hand, outside fx.
+A named server's handler SHALL be wrapped in every middleware provided for that name, and in no other server's. Middleware SHALL run from the lowest order, outermost, to the highest, innermost, with the handler inside them all. A middleware that declares an order SHALL use it, one wrapped with an order at wiring time SHALL use that order instead of its own, and any other SHALL count as order 0. Middleware with equal orders SHALL run in an unspecified relative order, and SHALL NOT fail startup. Each middleware SHALL receive, as the next handler, the rest of the chain for its position: built once, the same for every request, and safe for concurrent use. A middleware that doesn't call the next handler SHALL end the request there. A middleware constructor SHALL run only when its server is built. One that returns no middleware, as a nil value or as a nil pointer, function, map, slice or channel, wrapped with an order or not, SHALL leave its middleware out, and the server SHALL serve without it. The same ordering and the same leaving out SHALL apply to a chain built by hand, outside fx.
+
+#### Scenario: A constructor returns no middleware
+- **WHEN** server `api` has a middleware constructor that returns nil because its feature is off, one that returns a nil pointer, and one that returns a middleware
+- **THEN** a request to `api` succeeds and passes through only the returned middleware
 
 #### Scenario: Lower orders run outer
 - **WHEN** server `api` has middleware with orders 200, 10 and 100, each recording its order before calling the next handler
@@ -166,7 +170,15 @@ A named server's handler SHALL be wrapped in every middleware provided for that 
 
 ### Requirement: Names that match no server fail startup
 
-Providing middleware for a name, or opting a command in to running a name, when no server is provided under that name SHALL fail startup with an error matching the unknown-server sentinel that names it. The check SHALL NOT build any server or middleware.
+Providing middleware for a name, or opting a command in to running a name, when no server is provided under that name SHALL fail startup with an error matching the unknown-server sentinel that names it. The check SHALL NOT build any server or middleware. A name SHALL be non-empty and hold only ASCII letters, digits, `-`, `_` and `.`; providing a server, providing middleware or opting in to running under any other name SHALL fail startup with an error matching the invalid-name sentinel that names it. Every valid name SHALL work, whatever words it holds.
+
+#### Scenario: An invalid name
+- **WHEN** a server is provided as `a b`, or middleware is provided for `a:b`, or a command opts in to running the empty name
+- **THEN** startup fails with an error matching the invalid-name sentinel, naming the name
+
+#### Scenario: A name that matches an internal word
+- **WHEN** a server is provided as `built` and a command runs it
+- **THEN** the server binds and serves like any other
 
 #### Scenario: A misspelled middleware name
 - **WHEN** a server is provided as `api` and middleware is provided for `apii`

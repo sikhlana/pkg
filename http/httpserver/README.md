@@ -30,12 +30,17 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | Name | Description |
 |------|-------------|
 | Module | Provides the Provider and checks at startup that every ProvideMiddleware names a provided server. Builds no server itself. Takes the app's *slog.Logger when there is one. |
-| ProvideServer | Provides the *Server a constructor builds under a name, wrapped in that name's middleware. The constructor's Provider logs with the name as the server attribute, so the server's, net/http's and tlsconfig's records carry it. Built only when something injects it. A name provided twice fails startup, a nil *Server fails it with ErrNilServer, and an invalid name with ErrInvalidName. The constructor returns a server of its own: its handler is wrapped in place. Further fx annotations apply to the constructor after its own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency. |
+| ProvideServer | Provides a server under a name, built from the Spec a constructor returns, optionally with an error. Wraps the Spec's handler in that name's middleware, then builds the server through the app's Provider with WithName, so the server's, net/http's and tlsconfig's records carry the name, and a decoration of the Provider applies to every server. Built only when something injects it. A name provided twice fails startup, a Spec without a handler fails it with ErrNilHandler naming the server, and an invalid name with ErrInvalidName. Further fx annotations apply to the constructor after its own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency. |
 | ProvideRunner | Opts a command in to running the named server as the kernelrun runner httpserver:name: binds in OnStart, serves in the runner, releases an unserved listener in OnStop. Fails startup with ErrUnknownServer for an unknown name and ErrInvalidName for an invalid one. |
 | ProvideMiddleware | Adds the middleware a constructor builds to the named server's chain. The constructor returns any type implementing Middleware and runs only when the server is built. A constructor returning a nil Middleware leaves it out. Fails startup with ErrUnknownServer for an unknown name and ErrInvalidName for an invalid one. Further fx annotations apply to the constructor after its own, for its inputs and hooks, such as fx.ParamTags for a tagged dependency. |
+| Spec | What a ProvideServer constructor says a server serves. |
+| Spec.Config | The server's Config. |
+| Spec.Handler | The handler the server serves, before its middleware. Must not be nil. |
 | NameTag | Returns the name tag a server is provided under: name:"httpserver:server:NAME". |
 | MiddlewareGroup | Returns the group tag a server collects its middleware from, group:"httpserver:middleware:NAME", for injecting it elsewhere. Add to it with ProvideMiddleware: registering into the group directly skips the unknown-name check. |
-| Provider | Builds a Server from a Config and a handler. Validates the Config, reads the TLS files once to build the TLS configuration, and fails for a nil handler or a key pair that can't be loaded. |
+| Provider | Builds a Server from a Config, a handler and any Options. Validates the Config, reads the TLS files once to build the TLS configuration, and fails for a nil handler or a key pair that can't be loaded. A decoration passes the Options on to keep them. |
+| Option | A per-build setting of a Provider. |
+| WithName | Names the server: every record it logs, net/http's and tlsconfig's included, carries the name as server. An empty name adds nothing. ProvideServer passes it for every server; pass it yourself to a server built without fx. |
 | ProviderParams | NewProvider's input: an optional Logger. |
 | ProviderParams.Logger | Receives the servers' records, and net/http's own error reports, such as failed TLS handshakes, at Debug. Nil discards them. |
 | NewProvider | Returns a Provider whose servers log through ProviderParams.Logger. |
@@ -58,12 +63,11 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | Ordered | Returns a Middleware at a given order, replacing any order it declares. |
 | Chain | Wraps a handler in middleware, lowest order outermost, keeping the given order for ties. For servers built without fx. Leaves out a nil Middleware, a nil pointer, func, map, slice or channel behind one, and either wrapped by Ordered. |
 | ErrNegativeTimeout | A negative timeout. Carried under the timeout's key. |
-| ErrNilHandler | Returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux. |
+| ErrNilHandler | Returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux. Fails startup for a ProvideServer whose Spec has no handler, naming the server. |
 | ErrNotListening | Server.Serve on a server that hasn't bound, or has been closed. |
 | ErrAlreadyListening | Server.Listen on a server that has bound. |
 | ErrAlreadyServing | Server.Serve on a server another call is serving. |
 | ErrShutdownTimeout | Returned by Server.Serve when connections were still active once shutdown_timeout passed, and were closed. Deliberately doesn't match context.DeadlineExceeded, so kernelrun reports it as a crash however the run ended. |
-| ErrNilServer | A ProvideServer constructor returned a nil *Server without an error. Carries the name. |
 | ErrInvalidName | A ProvideServer, ProvideMiddleware or ProvideRunner name that's empty or holds a character other than a letter, a digit, -, _ or the full stop. Carries the name. |
 | ErrUnknownServer | A ProvideMiddleware or ProvideRunner naming no provided server. Carries the name. |
 
@@ -71,12 +75,16 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 
 ### Standalone
 
-Build a server through a Provider, bind it, and serve it until the context ends. Close releases the listener if something fails before Serve takes it over:
+Build a server through a Provider, bind it, and serve it until the context ends. `WithName` puts the name on its records, as `ProvideServer` does under fx. Close releases the listener if something fails before Serve takes it over:
 
 ```go
 p := httpserver.NewProvider(httpserver.ProviderParams{Logger: logger})
 
-s, err := p(httpserver.Config{Port: 8080}, httpserver.Chain(mux, recovery{logger: logger}, requestCounter{}))
+s, err := p(
+	httpserver.Config{Port: 8080},
+	httpserver.Chain(mux, recovery{logger: logger}, requestCounter{}),
+	httpserver.WithName("api"),
+)
 if err != nil {
 	return err
 }
@@ -92,7 +100,7 @@ return s.Serve(ctx)
 
 ### With fx
 
-A module that serves HTTP owns its server. Its Config embeds `httpserver.Config`, squashed so the server's keys sit beside the module's own, and its `Module` provides the server with `ProvideServer` and a constructor that injects the Provider, the Config and the handler:
+A module that serves HTTP owns its server. Its Config embeds `httpserver.Config`, squashed so the server's keys sit beside the module's own, and its `Module` provides the server with `ProvideServer` and a constructor that says what to serve, the server's Config and its handler. `ProvideServer` wraps the handler in the server's middleware and builds the server itself:
 
 ```go
 package api
@@ -109,16 +117,21 @@ var Module = fx.Module("api",
 	httpserver.ProvideServer("api", newServer),
 )
 
-type serverParams struct {
-	fx.In
-
-	Provider httpserver.Provider
-	Config   Config
-	Handler  *Handler
+func newServer(c Config, h *Handler) httpserver.Spec {
+	return httpserver.Spec{Config: c.Config, Handler: h}
 }
+```
 
-func newServer(p serverParams) (*httpserver.Server, error) {
-	return p.Provider(p.Config.Config, p.Handler)
+A constructor that can fail building its handler returns an error after the Spec, which fails startup in the commands that build the server:
+
+```go
+func newServer(c Config, store *Store) (httpserver.Spec, error) {
+	h, err := NewHandler(store, c.MaxUploadSize)
+	if err != nil {
+		return httpserver.Spec{}, fmt.Errorf("building handler: %w", err)
+	}
+
+	return httpserver.Spec{Config: c.Config, Handler: h}, nil
 }
 ```
 
@@ -272,6 +285,20 @@ httpserver.ProvideMiddleware("api", func(tp trace.TracerProvider, prop propagati
 
 A `ProvideMiddleware` or `ProvideRunner` whose name matches no `ProvideServer` fails startup with `ErrUnknownServer`, without building anything.
 
+#### Decorating the Provider
+
+Every server `ProvideServer` provides is built through the app's Provider, so an `fx.Decorate` of the Provider applies to all of them, such as metrics around every server's handler. Pass the build's options on, or the server loses its name on its records:
+
+```go
+fx.Decorate(func(p httpserver.Provider, m *Metrics) httpserver.Provider {
+	return func(cfg httpserver.Config, h http.Handler, opts ...httpserver.Option) (*httpserver.Server, error) {
+		return p(cfg, m.Instrument(h), opts...)
+	}
+})
+```
+
+The handler a decoration wraps already runs the server's middleware, so its wrap runs outside every middleware, recovery and auth included: recovery doesn't catch a panic in the wrap, and the wrap sees the requests auth answered with a 401. Middleware that has to run inside recovery or auth belongs in `ProvideMiddleware` with an order, not in a decoration.
+
 #### Logging
 
-Records go through the app's `*slog.Logger`, each carrying the server's name as `server`: `http server listening` at Info with the bound `address`, `http server draining` at Info when the runner is cancelled, and `http server stopped` at Debug after a clean drain. net/http's own error reports, such as TLS handshakes from scanners, are logged at Debug through the same logger and never reach the standard library's `log` package. tlsconfig logs key pair loads and rotations with their file paths, through the same named logger, so with several TLS servers each rotation names its server.
+Records go through the app's `*slog.Logger`, each carrying the server's name as `server`: `http server listening` at Info with the bound `address`, `http server draining` at Info when the runner is cancelled, and `http server stopped` at Debug after a clean drain. net/http's own error reports, such as TLS handshakes from scanners, are logged at Debug through the same logger and never reach the standard library's `log` package. tlsconfig logs key pair loads and rotations with their file paths, through the same named logger, so with several TLS servers each rotation names its server. A server built without fx carries a name when it's built with `WithName`.

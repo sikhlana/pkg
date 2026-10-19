@@ -102,7 +102,10 @@ context: |
     struct embedding fx.In, even for one dependency. Name it Params, or
     by purpose (PublisherParams) when a module has several. The
     fx.Lifecycle field is named Lifecycle. Optional dependencies use
-    `optional:"true"`.
+    `optional:"true"`. The one exception: a constructor whose tags
+    depend on an instance name given at wiring time can't carry them
+    in struct tags, so it takes positional parameters annotated with
+    fx.ParamTags.
   - Name tags are name:"<module>:<purpose>:<name>", where <module> is
     the fx.Module name, as in group tags below. An exported helper
     (ConfigNameTag(name)) builds them so callers never format them.
@@ -110,6 +113,32 @@ context: |
     constant. A new group ships the constant, a typed ProvideX helper
     that tags the caller's constructor, and a collector that takes the
     group via fx.In.
+    A group keyed by an instance name (one middleware group per named
+    server) can't be a constant: it's group:"<module>:<purpose>:<name>",
+    exposed as a function returning the tag (MiddlewareGroup(name)),
+    beside its ProvideX(name, ...) helper and its collector.
+  - A helper whose caller's constructor may need a tag built at wiring
+    time, because it registers into another module's machinery
+    (kernelrun.ProvideRunner) or builds named instances
+    (httpserver.ProvideServer), takes anns ...fx.Annotation after its
+    other parameters and passes them to fx.Annotate after its own, so
+    such a constructor still goes through the helper. They're for the
+    constructor's inputs and hooks (fx.ParamTags, fx.From, fx.OnStart,
+    fx.OnStop); one that repeats what the helper sets fails startup
+    with fx's error, and the godoc says so. A helper that annotates a
+    value or a constructor with fixed dependencies (AsX) doesn't take
+    them: an fx.In struct with static tags covers that.
+  - A segment naming an action done to the value (built, wired,
+    supplied) is separated by a double colon:
+    name:"<module>:<purpose>::<action>" (name:"kernelrun:runner::built",
+    name:"telemetry/trace:provider::supplied"). Instance names can't
+    contain ":", so such a tag can't collide with one built from an
+    instance name.
+  - Instance names (a named server) are non-empty and limited to
+    letters, digits, "-", "_" and ".", so they read cleanly in tags,
+    runner names and logs. Every helper that takes one checks it, and
+    an invalid name fails startup through fx.Error with an exported
+    ErrInvalidName.
 
   Choosing how to expose a type (one shape per type):
   1. Singleton: fx.Provide(New) when one instance per app suffices.
@@ -167,6 +196,10 @@ context: |
     running. Shared infrastructure lists the Module; only the commands
     that need the loop list ProvideRunner. It registers through
     kernelrun.ProvideRunner under DefaultRunnerName.
+  - A module whose loops are named instances (several servers) has
+    no DefaultRunnerName: ProvideRunner(name) opts one instance in and
+    registers it as <module>:<name>, so an instance name can't collide
+    with another module's runner.
   - A loop module prepares in OnStart (binding a listener, opening a
     subscription), serves in its runner until the runner's context is
     cancelled, and releases in OnStop what OnStart acquired. A setup

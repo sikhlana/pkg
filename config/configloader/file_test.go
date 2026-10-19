@@ -2,34 +2,16 @@ package configloader_test
 
 import (
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sikhlana/pkg/config/configloader"
 )
-
-func TestEnvNameOfANestedKey(t *testing.T) {
-	isolate(t)
-	t.Setenv("MY_SVC_HTTP_READ_TIMEOUT", "30s")
-
-	cfg, err := configloader.Load(configloader.Options[testConfig]{Name: name})
-	require.NoError(t, err)
-	assert.Equal(t, 30*time.Second, cfg.HTTP.ReadTimeout)
-}
-
-func TestNameIsChecked(t *testing.T) {
-	for _, n := range []string{"", "../etc", "my svc", "my.svc", "1password-sync"} {
-		t.Run(n, func(t *testing.T) {
-			_, err := configloader.Load(configloader.Options[testConfig]{Name: n})
-			require.ErrorIs(t, err, configloader.ErrInvalidName)
-		})
-	}
-}
 
 func TestExplicitFileMissing(t *testing.T) {
 	isolate(t)
@@ -253,4 +235,65 @@ func TestFileWithoutADecoder(t *testing.T) {
 	require.ErrorContains(t, err, path)
 	require.ErrorContains(t, err, "no decoder for the ini format")
 	assert.NotContains(t, err.Error(), "hunter2")
+}
+
+func TestReportsTheFileTheSearchFound(t *testing.T) {
+	isolate(t)
+
+	records, logger := newCapture()
+	dir := t.TempDir()
+	path := writeFile(t, dir, "config.yaml", "http:\n  port: 9090\n")
+
+	_, err := configloader.Load(
+		configloader.Options[testConfig]{Name: name, SearchPaths: []string{dir}, Logger: logger},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []record{{
+		Level:   slog.LevelInfo,
+		Message: "loaded config file",
+		Attrs:   map[string]any{"path": path},
+	}}, records.all())
+}
+
+func TestReportsTheExplicitFile(t *testing.T) {
+	isolate(t)
+
+	records, logger := newCapture()
+	path := configFile(t, "http:\n  port: 9090\n")
+
+	_, err := configloader.Load(configloader.Options[testConfig]{Name: name, Filename: path, Logger: logger})
+	require.NoError(t, err)
+	assert.Equal(t, []record{{
+		Level:   slog.LevelInfo,
+		Message: "loaded config file",
+		Attrs:   map[string]any{"path": path},
+	}}, records.all())
+}
+
+func TestReportsThatNoFileWasFound(t *testing.T) {
+	isolate(t)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	records, logger := newCapture()
+	dir := t.TempDir()
+
+	_, err := configloader.Load(
+		configloader.Options[testConfig]{Name: name, SearchPaths: []string{dir}, Logger: logger},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, []record{{
+		Level:   slog.LevelInfo,
+		Message: "no config file found",
+		Attrs: map[string]any{
+			"searched": []string{
+				filepath.Join(dir, "config.*"),
+				".my-svc.*",
+				filepath.Join(home, ".config", "my-svc", "config.*"),
+				filepath.Join(home, ".my-svc", "config.*"),
+				filepath.Join("/etc", "my-svc", "config.*"),
+			},
+		},
+	}}, records.all())
 }

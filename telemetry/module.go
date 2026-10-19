@@ -36,25 +36,3 @@ type globalsParams struct {
 	Propagator     propagation.TextMapPropagator
 	TracerProvider oteltrace.TracerProvider `optional:"true"`
 }
-
-// AsServiceName annotates v, a string or a constructor returning one, as the resource's service.name. Wrap it in
-// fx.Supply or fx.Provide.
-func AsServiceName(v any) any {
-	return fx.Annotate(v, fx.ResultTags(`name:"telemetry:resource:service_name"`))
-}
-
-// WithServiceName supplies the resource's service.name. OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override it.
-func WithServiceName(name string) fx.Option {
-	return fx.Supply(AsServiceName(name))
-}
-
-// AsServiceVersion annotates v, a string or a constructor returning one, as the resource's service.version. Wrap it
-// in fx.Supply or fx.Provide.
-func AsServiceVersion(v any) any {
-	return fx.Annotate(v, fx.ResultTags(`name:"telemetry:resource:service_version"`))
-}
-
-// WithServiceVersion supplies the resource's service.version. OTEL_RESOURCE_ATTRIBUTES overrides it.
-func WithServiceVersion(version string) fx.Option {
-	return fx.Supply(AsServiceVersion(version))
-}

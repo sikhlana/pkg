@@ -10,26 +10,9 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/sikhlana/pkg/tools/release/vulncheck"
-	"github.com/sikhlana/pkg/tools/release/workspace"
 )
 
-const runURL = "https://github.com/sikhlana/pkg/actions/runs/42"
-
 var errTracker = errors.New("GitHub is down")
-
-func findings(ids ...string) []vulncheck.Result {
-	advisories := make([]vulncheck.Advisory, 0, len(ids))
-
-	for _, id := range ids {
-		advisories = append(advisories, vulncheck.Advisory{ID: id, Dependency: "golang.org/x/net", Version: "v0.22.0"})
-	}
-
-	return []vulncheck.Result{{Dir: "cli"}, {Dir: "kernel", Advisories: advisories}}
-}
-
-func clean() []vulncheck.Result {
-	return []vulncheck.Result{{Dir: "cli"}, {Dir: "kernel"}}
-}
 
 func TestReconcileFindingsWithoutAnIssueOpensOne(t *testing.T) {
 	results := findings("GO-1")
@@ -193,75 +176,6 @@ func TestReconcileFailedCloseDoesNotComment(t *testing.T) {
 	require.ErrorIs(t, err, errTracker)
 }
 
-func TestRunScanErrorLeavesTheTrackerUntouched(t *testing.T) {
-	// No expectations: any call fails the test.
-	tracker := NewMockTracker(gomock.NewController(t))
-
-	results, _, err := vulncheck.Run(t.Context(), vulncheck.Options{
-		Jobs:      4,
-		Workspace: workspaceOf(t, "cli", "kernel"),
-		Run:       runs(map[string][]byte{"cli": nil}),
-		Tracker:   tracker,
-		RunURL:    runURL,
-	})
-
-	require.ErrorIs(t, err, vulncheck.ErrIncomplete)
-	assert.Equal(t, []vulncheck.Result{{Dir: "cli"}}, results, "the completed scans, for an incomplete report")
-}
-
-func TestRunReconciles(t *testing.T) {
-	tracker := NewMockTracker(gomock.NewController(t))
-
-	tracker.EXPECT().Find(gomock.Any(), vulncheck.Label).Return(vulncheck.Issue{}, false, nil)
-
-	results, outcome, err := vulncheck.Run(t.Context(), vulncheck.Options{
-		Jobs:      4,
-		Workspace: workspaceOf(t, "cli"),
-		Run:       runs(map[string][]byte{"cli": nil}),
-		Tracker:   tracker,
-	})
-	require.NoError(t, err)
-
-	assert.Equal(t, []vulncheck.Result{{Dir: "cli"}}, results)
-	assert.Equal(t, vulncheck.ActionNone, outcome.Action)
-}
-
-func TestRunWithoutATrackerOnlyScans(t *testing.T) {
-	results, outcome, err := vulncheck.Run(t.Context(), vulncheck.Options{
-		Jobs:      4,
-		Workspace: workspaceOf(t, "cli"),
-		Run:       runs(map[string][]byte{"cli": recorded(t)}),
-	})
-	require.NoError(t, err)
-
-	assert.Equal(t, []vulncheck.Result{{Dir: "cli", Advisories: []vulncheck.Advisory{reachable}}}, results)
-	assert.Equal(t, vulncheck.Outcome{}, outcome)
-}
-
-func TestRunURL(t *testing.T) {
-	env := map[string]string{
-		"GITHUB_SERVER_URL": "https://github.com",
-		"GITHUB_REPOSITORY": "sikhlana/pkg",
-		"GITHUB_RUN_ID":     "42",
-	}
-
-	assert.Equal(t, runURL, vulncheck.RunURL(func(k string) string { return env[k] }))
-	assert.Empty(t, vulncheck.RunURL(func(string) string { return "" }))
-}
-
-// workspaceOf returns a workspace rooted in a temporary directory with a library module in each of dirs and no tools.
-func workspaceOf(t *testing.T, dirs ...string) workspace.Workspace {
-	t.Helper()
-
-	modules := make([]workspace.Module, 0, len(dirs))
-
-	for _, dir := range dirs {
-		modules = append(modules, workspace.Module{Dir: dir})
-	}
-
-	return workspace.Workspace{Root: t.TempDir(), Modules: modules}
-}
-
 func TestReconcileDigestMarkerDetectsAChangeWithoutListingIt(t *testing.T) {
 	previous := manyFindings(0)
 	results := manyFindings(1)
@@ -357,4 +271,15 @@ func TestReconcileFixWithdrawnComments(t *testing.T) {
 
 	_, err := vulncheck.Reconcile(t.Context(), tracker, results, runURL)
 	require.NoError(t, err)
+}
+
+func TestRunURL(t *testing.T) {
+	env := map[string]string{
+		"GITHUB_SERVER_URL": "https://github.com",
+		"GITHUB_REPOSITORY": "sikhlana/pkg",
+		"GITHUB_RUN_ID":     "42",
+	}
+
+	assert.Equal(t, runURL, vulncheck.RunURL(func(k string) string { return env[k] }))
+	assert.Empty(t, vulncheck.RunURL(func(string) string { return "" }))
 }

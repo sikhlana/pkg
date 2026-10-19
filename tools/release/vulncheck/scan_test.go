@@ -2,7 +2,6 @@ package vulncheck_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -17,8 +16,6 @@ import (
 	"github.com/sikhlana/pkg/tools/release/workspace"
 )
 
-var errScan = errors.New("vulnerability database unreachable")
-
 // fake writes a shell script standing in for govulncheck.
 func fake(t *testing.T, script string) vulncheck.Govulncheck {
 	t.Helper()
@@ -30,20 +27,6 @@ func fake(t *testing.T, script string) vulncheck.Govulncheck {
 	require.NoError(t, err)
 
 	return g
-}
-
-// runs returns a RunFunc answering from outputs, keyed by the directory's
-// base name, and failing with errScan for a directory it lacks.
-func runs(outputs map[string][]byte) vulncheck.RunFunc {
-	return func(_ context.Context, dir string) ([]byte, error) {
-		out, ok := outputs[filepath.Base(dir)]
-
-		if !ok {
-			return nil, errScan
-		}
-
-		return out, nil
-	}
 }
 
 func TestGovulncheckRunPassesJSONModeWithTheWorkspaceOff(t *testing.T) {

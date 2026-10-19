@@ -2,7 +2,6 @@ package publish
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,9 +17,6 @@ const DefaultProxyURL = "https://proxy.golang.org"
 // DefaultProxyTimeout bounds one announcement, including the proxy fetching
 // the version from GitHub.
 const DefaultProxyTimeout = 30 * time.Second
-
-// ErrProxyStatus reports a non-200 response from the module proxy.
-var ErrProxyStatus = errors.New("unexpected module proxy status")
 
 // Proxy announces new versions to a Go module proxy by requesting them, so
 // they resolve, and reach the checksum database and pkg.go.dev, straight

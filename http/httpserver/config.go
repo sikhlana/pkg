@@ -30,9 +30,6 @@ const (
 	DefaultShutdownTimeout = 10 * time.Second
 )
 
-// ErrNegativeTimeout reports a negative timeout. The error carries the timeout's key.
-var ErrNegativeTimeout = errors.New("timeout must not be negative")
-
 // Config is a server's operator settings. Zero timeouts mean their Default* constants.
 type Config struct {
 	// Host is the hostname or IP address the server listens on. Empty means every interface.

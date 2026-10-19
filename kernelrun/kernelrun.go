@@ -1,3 +1,6 @@
+// Package kernelrun runs an fx app's named runners between its start and stop: the first runner to return stops the
+// rest, every ending stops the app through its OnStop hooks, and those hooks learn from runerr whether the run crashed.
+// Loop modules import it to register their runners without pulling in cobra, viper or log.
 package kernelrun
 
 import (
@@ -22,17 +25,6 @@ const DefaultStartTimeout = 15 * time.Second
 // DefaultStopTimeout bounds the app's OnStop hooks when Options.StopTimeout is zero.
 const DefaultStopTimeout = 15 * time.Second
 
-var (
-	// ErrNoRunners is returned by Run for an app that registers no runners.
-	ErrNoRunners = errors.New("no runners")
-
-	// ErrDuplicateRunner is returned by Run for an app that registers two runners under one name.
-	ErrDuplicateRunner = errors.New("duplicate runner name")
-
-	// ErrInvalidRunner is returned by Run for a runner with an empty name or a nil Func.
-	ErrInvalidRunner = errors.New("invalid runner")
-)
-
 // Options holds Run's developer settings. The zero value uses the defaults.
 type Options struct {
 	// StartTimeout bounds the OnStart hooks. Zero means DefaultStartTimeout.
@@ -48,16 +40,6 @@ type runParams struct {
 
 	Runners []Runner     `group:"kernelrun:runner"`
 	Logger  *slog.Logger `optional:"true"`
-}
-
-// ErrExited is the crash a runner that exits through runtime.Goexit, without returning, becomes. Run wraps it with the
-// runner's name.
-var ErrExited = errors.New("exited without returning")
-
-// panicError is the crash a runner's recovered panic becomes.
-type panicError struct {
-	value any
-	stack []byte
 }
 
 // Run builds an fx app from opts, starts it, runs its runners until the first one returns, and stops it.
@@ -120,11 +102,6 @@ func (o Options) startTimeout() time.Duration {
 
 func (o Options) stopTimeout() time.Duration {
 	return cmp.Or(o.StopTimeout, DefaultStopTimeout)
-}
-
-// Error returns "panic: " followed by the panic's value.
-func (e *panicError) Error() string {
-	return fmt.Sprintf("panic: %v", e.value)
 }
 
 // check reports the first problem with runners.

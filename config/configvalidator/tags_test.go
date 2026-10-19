@@ -3,27 +3,12 @@ package configvalidator_test
 import (
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sikhlana/pkg/config/configvalidator"
 )
-
-type Server struct {
-	Host string `mapstructure:"host" validate:"required"`
-}
-
-type HTTP struct {
-	Server `mapstructure:",squash"`
-
-	Port int `mapstructure:"port" validate:"min=1024"`
-}
-
-type Cache struct {
-	TTL time.Duration `mapstructure:"ttl" validate:"required"`
-}
 
 type Named struct {
 	Name string `mapstructure:"name" validate:"required"`
@@ -58,10 +43,6 @@ func (t Tier) MarshalText() ([]byte, error) {
 
 func (t Tier) String() string {
 	return "Tier(" + strconv.Itoa(int(t)) + ")"
-}
-
-func validHTTP() HTTP {
-	return HTTP{Host: "localhost", Port: 8080}
 }
 
 func TestTagViolationNamesTheRule(t *testing.T) {

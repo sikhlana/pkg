@@ -3,20 +3,16 @@
 package configloader
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
 	"strings"
 
 	"github.com/spf13/viper"
+	"go.uber.org/fx"
 
 	"github.com/sikhlana/pkg/config/configvalidator"
 )
-
-// ErrInvalidName is returned when Options.Name is empty, starts with a digit, or holds anything other than ASCII
-// letters, digits, - and _.
-var ErrInvalidName = errors.New("invalid name")
 
 // Options says where Load reads a config of type T from.
 type Options[T any] struct {
@@ -105,6 +101,38 @@ func Load[T any](o Options[T]) (T, error) {
 	}
 
 	return cfg, nil
+}
+
+// Params is what Provide's constructor takes from the graph.
+type Params struct {
+	fx.In
+
+	// Filename is the config file AsFilename or WithFilename supplied. It wins over Options.Filename; empty falls
+	// back to it.
+	Filename string `name:"configloader:filename" optional:"true"`
+
+	// Logger is the app's logger, such as the one log.Module provides. It wins over Options.Logger.
+	Logger *slog.Logger `optional:"true"`
+}
+
+// Provide loads a T with Load and provides it to the graph, once. The file comes from Params.Filename, then
+// o.Filename, then the search, and a failed load fails the app's start with the load error. When T embeds fx.Out, fx
+// provides each of its fields instead, so sections of the app's config reach the modules that take them.
+func Provide[T any](o Options[T]) fx.Option {
+	return fx.Module("configloader", fx.Provide(func(p Params) (T, error) {
+		// A copy, so an option reused in another app doesn't inherit this one's wiring.
+		opts := o
+
+		if p.Filename != "" {
+			opts.Filename = p.Filename
+		}
+
+		if p.Logger != nil {
+			opts.Logger = p.Logger
+		}
+
+		return Load(opts)
+	}))
 }
 
 // loader holds one load's state. Every load builds its own, so loads never share a viper instance.

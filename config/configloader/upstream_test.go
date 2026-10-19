@@ -17,7 +17,7 @@ import (
 // These tests pin library behaviour the loader's design relies on, so an upgrade that changes it fails here first.
 
 func TestViperLowercasesMapKeys(t *testing.T) {
-	v := readSpikeFile(t, "labels:\n  Team: core\n")
+	v := readUpstreamFile(t, "labels:\n  Team: core\n")
 
 	var cfg struct {
 		Labels map[string]string `mapstructure:"labels"`
@@ -29,7 +29,7 @@ func TestViperLowercasesMapKeys(t *testing.T) {
 }
 
 func TestViperReplacesADefaultSliceWithTheFiles(t *testing.T) {
-	v := readSpikeFile(t, "hosts: [x]\n")
+	v := readUpstreamFile(t, "hosts: [x]\n")
 	v.SetDefault("hosts", []string{"a", "b", "c"})
 
 	var cfg struct {
@@ -41,7 +41,7 @@ func TestViperReplacesADefaultSliceWithTheFiles(t *testing.T) {
 }
 
 func TestViperMergesMapEntriesAcrossDefaultsAndTheFile(t *testing.T) {
-	v := readSpikeFile(t, "labels:\n  tier: gold\n  zone: eu\n")
+	v := readUpstreamFile(t, "labels:\n  tier: gold\n  zone: eu\n")
 	v.SetDefault("labels.team", "core")
 	v.SetDefault("labels.tier", "silver")
 
@@ -80,19 +80,19 @@ func TestViperKeepsTextDecodedDefaults(t *testing.T) {
 		Trusted netip.Prefix `mapstructure:"trusted"`
 	}
 
-	require.NoError(t, v.Unmarshal(&cfg, spikeHooks(mapstructure.TextUnmarshallerHookFunc())))
+	require.NoError(t, v.Unmarshal(&cfg, upstreamHooks(mapstructure.TextUnmarshallerHookFunc())))
 	assert.Equal(t, cutoff, cfg.Cutoff)
 	assert.Equal(t, trusted, cfg.Trusted)
 }
 
 func TestNetIPDecodesAsTextBeforeTheWeakSliceHook(t *testing.T) {
-	v := readSpikeFile(t, "ip: 10.0.0.1\n")
+	v := readUpstreamFile(t, "ip: 10.0.0.1\n")
 
 	var cfg struct {
 		IP net.IP `mapstructure:"ip"`
 	}
 
-	require.NoError(t, v.Unmarshal(&cfg, spikeHooks(
+	require.NoError(t, v.Unmarshal(&cfg, upstreamHooks(
 		mapstructure.TextUnmarshallerHookFunc(),
 		mapstructure.StringToWeakSliceHookFunc(","),
 	)))
@@ -103,7 +103,7 @@ func TestViperBindEnvReadsTheNameVerbatim(t *testing.T) {
 	t.Setenv("SPIKE_HTTP_PORT", "9191")
 	t.Setenv("SPIKE_HTTP", "shadow")
 
-	v := readSpikeFile(t, "http:\n  port: 9090\n  host: localhost\n")
+	v := readUpstreamFile(t, "http:\n  port: 9090\n  host: localhost\n")
 	require.NoError(t, v.BindEnv("http.port", "SPIKE_HTTP_PORT"))
 
 	var cfg struct {
@@ -118,8 +118,8 @@ func TestViperBindEnvReadsTheNameVerbatim(t *testing.T) {
 	assert.Equal(t, "localhost", cfg.HTTP.Host)
 }
 
-// readSpikeFile returns a fresh viper that has read contents as a YAML config file.
-func readSpikeFile(t *testing.T, contents string) *viper.Viper {
+// readUpstreamFile returns a fresh viper that has read contents as a YAML config file.
+func readUpstreamFile(t *testing.T, contents string) *viper.Viper {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -132,7 +132,7 @@ func readSpikeFile(t *testing.T, contents string) *viper.Viper {
 	return v
 }
 
-// spikeHooks returns a viper decoder option composing hooks.
-func spikeHooks(hooks ...mapstructure.DecodeHookFunc) viper.DecoderConfigOption {
+// upstreamHooks returns a viper decoder option composing hooks.
+func upstreamHooks(hooks ...mapstructure.DecodeHookFunc) viper.DecoderConfigOption {
 	return viper.DecodeHook(mapstructure.ComposeDecodeHookFunc(hooks...))
 }

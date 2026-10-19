@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/resource"
 
 	"github.com/sikhlana/pkg/telemetry"
 )
@@ -106,6 +108,17 @@ func attrs(r slog.Record) map[string]slog.Value {
 
 		return true
 	})
+
+	return out
+}
+
+// resourceAttrs returns a resource's attributes as strings, by key.
+func resourceAttrs(res *resource.Resource) map[attribute.Key]string {
+	out := make(map[attribute.Key]string)
+
+	for _, kv := range res.Attributes() {
+		out[kv.Key] = kv.Value.String()
+	}
 
 	return out
 }

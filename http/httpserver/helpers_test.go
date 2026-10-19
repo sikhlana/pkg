@@ -18,12 +18,16 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"go.uber.org/fx"
+
 	"github.com/sikhlana/pkg/http/httpserver"
+	"github.com/sikhlana/pkg/kernelrun"
 )
 
 // authority is a private CA for TLS tests.
@@ -208,11 +212,17 @@ var ok = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 	_, _ = io.WriteString(w, "ok")
 })
 
-// build builds a server for cfg through a Provider logging to logger.
-func build(t *testing.T, cfg httpserver.Config, h http.Handler, logger *slog.Logger) *httpserver.Server {
+// build builds a server for cfg through a Provider logging to logger, with opts.
+func build(
+	t *testing.T,
+	cfg httpserver.Config,
+	h http.Handler,
+	logger *slog.Logger,
+	opts ...httpserver.Option,
+) *httpserver.Server {
 	t.Helper()
 
-	s, err := httpserver.NewProvider(httpserver.ProviderParams{Logger: logger})(cfg, h)
+	s, err := httpserver.NewProvider(httpserver.ProviderParams{Logger: logger})(cfg, h, opts...)
 	require.NoError(t, err)
 
 	return s
@@ -297,3 +307,52 @@ func waitFor(t *testing.T, done <-chan error) error {
 		return nil
 	}
 }
+
+// configs holds each test server's Config by name, supplied whole so constructors can pick their own.
+type configs map[string]httpserver.Config
+
+// servers is what a test runner injects to reach the named servers, as an app would.
+type servers struct {
+	fx.In
+
+	API   *httpserver.Server `name:"httpserver:server:api"   optional:"true"`
+	Admin *httpserver.Server `name:"httpserver:server:admin" optional:"true"`
+}
+
+// plain returns a Config for a plaintext server on 127.0.0.1:0.
+func plain() httpserver.Config {
+	return httpserver.Config{Host: "127.0.0.1", ShutdownTimeout: time.Second}
+}
+
+// provide provides the server name, answering with its own name, and counts its constructor's calls in calls.
+func provide(name string, calls *atomic.Int32) fx.Option {
+	return httpserver.ProvideServer(name, func(c configs) httpserver.Spec {
+		calls.Add(1)
+
+		return httpserver.Spec{Config: c[name], Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, name)
+		})}
+	})
+}
+
+// shared returns the options every command of a test app lists: the Module, a logger and the configs.
+func shared(logger *slog.Logger, c configs, opts ...fx.Option) fx.Option {
+	return fx.Options(append([]fx.Option{httpserver.Module, fx.Supply(logger, c)}, opts...)...)
+}
+
+// run runs an app of opts under kernelrun.
+func run(t *testing.T, opts ...fx.Option) error {
+	t.Helper()
+
+	return kernelrun.Run(t.Context(), kernelrun.Options{StopTimeout: 5 * time.Second}, opts...)
+}
+
+// probe registers a runner that calls f with the servers once the app has started, and returns f's result.
+func probe(f func(ctx context.Context, s servers) error) fx.Option {
+	return kernelrun.ProvideRunner("probe", func(s servers) kernelrun.Func {
+		return func(ctx context.Context) error { return f(ctx, s) }
+	})
+}
+
+// idle registers a runner that returns at once, for commands that run nothing else.
+var idle = kernelrun.WithRunner("idle", func(context.Context) error { return nil })

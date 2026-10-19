@@ -1,8 +1,9 @@
 package cli_test
 
 import (
-	"bytes"
 	"errors"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -12,139 +13,79 @@ import (
 	"github.com/sikhlana/pkg/cli"
 )
 
-type result struct {
-	code   int
-	stdout string
-	stderr string
-}
+const mainChildEnv = "CLI_TEST_MAIN_CHILD"
 
-func TestRootCommandRuntimeError(t *testing.T) {
-	got := execute(t, newRoot(&cobra.Command{
-		Use: "serve",
-		RunE: func(*cobra.Command, []string) error {
-			return errors.New("boom")
-		},
-	}), "serve")
+func TestRunReturnsTheExitCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "success", err: nil, want: 0},
+		{name: "exit code", err: cli.Exit(7, nil), want: 7},
+	}
 
-	assert.Equal(t, result{code: 1, stderr: "Error: boom\n"}, got)
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cli.Run(func() *cobra.Command {
+				return quietCommand(func(*cobra.Command, []string) error {
+					return tt.err
+				})
+			})
 
-func TestRootCommandFlagError(t *testing.T) {
-	got := execute(t, newRoot(&cobra.Command{
-		Use: "serve",
-		Run: func(*cobra.Command, []string) {},
-	}), "serve", "--nope")
-
-	assert.Equal(t, result{code: 1, stderr: "Error: unknown flag: --nope\n"}, got)
-}
-
-func TestRootCommandQuietExit(t *testing.T) {
-	got := execute(t, newRoot(&cobra.Command{
-		Use: "check",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cmd.SilenceErrors = true
-
-			return cli.Exit(1, nil)
-		},
-	}), "check")
-
-	assert.Equal(t, result{code: 1}, got)
-}
-
-func TestRootCommandHelp(t *testing.T) {
-	got := execute(t, newRoot(), "--help")
-
-	require.Equal(t, 0, got.code)
-	assert.Contains(t, got.stdout, "Usage:")
-}
-
-func TestVersionFlagMatchesSubcommand(t *testing.T) {
-	want := result{stdout: "myapp " + cli.ReadBuildInfo().String() + "\n"}
-
-	assert.Equal(t, want, execute(t, newRoot(), "--version"))
-	assert.Equal(t, want, execute(t, newRoot(), "version"))
-}
-
-func TestVersionFollowsTheRoot(t *testing.T) {
-	want := result{stdout: "myapp 1.4.0\n"}
-
-	for _, args := range [][]string{{"--version"}, {"version"}} {
-		root := newRoot()
-
-		root.Version = "1.4.0"
-
-		assert.Equal(t, want, execute(t, root, args...))
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
 
-func TestVersionCommandUnderAnyRoot(t *testing.T) {
-	root := &cobra.Command{Use: "other"}
+func TestRunGivesCommandsACancellableContext(t *testing.T) {
+	var live, cancellable bool
 
-	root.AddCommand(cli.NewVersionCommand())
-
-	assert.Equal(t, result{stdout: "other " + cli.ReadBuildInfo().String() + "\n"}, execute(t, root, "version"))
-}
-
-func TestRootHasNoConfigFlag(t *testing.T) {
-	var ran bool
-
-	root := newRoot(&cobra.Command{
-		Use: "serve",
-		RunE: func(*cobra.Command, []string) error {
-			ran = true
+	cli.Run(func() *cobra.Command {
+		return quietCommand(func(cmd *cobra.Command, _ []string) error {
+			live = cmd.Context().Err() == nil
+			cancellable = cmd.Context().Done() != nil
 
 			return nil
-		},
+		})
 	})
 
-	got := execute(t, root, "serve", "--config", "/etc/myapp.yaml")
-
-	assert.Equal(t, result{code: 1, stderr: "Error: unknown flag: --config\n"}, got)
-	assert.False(t, ran, "the command ran")
+	assert.True(t, live)
+	assert.True(t, cancellable)
 }
 
-func TestSubcommandOwnsEveryShorthand(t *testing.T) {
-	var got int
-
-	serve := &cobra.Command{
-		Use: "serve",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			var err error
-
-			got, err = cmd.Flags().GetInt("concurrency")
-
-			return err
-		},
+func TestMainExitsWithTheCode(t *testing.T) {
+	if os.Getenv(mainChildEnv) != "" {
+		cli.Main(func() *cobra.Command {
+			return quietCommand(func(*cobra.Command, []string) error {
+				return cli.Exit(7, nil)
+			})
+		})
 	}
 
-	serve.Flags().IntP("concurrency", "c", 1, "number of workers")
+	exe, err := os.Executable()
+	require.NoError(t, err)
 
-	require.Equal(t, result{}, execute(t, newRoot(serve), "serve", "-c", "4"))
-	assert.Equal(t, 4, got)
+	child := exec.CommandContext(t.Context(), exe, "-test.run=^"+t.Name()+"$")
+
+	child.Env = append(os.Environ(), mainChildEnv+"=1")
+
+	exitErr, ok := errors.AsType[*exec.ExitError](child.Run())
+	require.True(t, ok, "child exited 0")
+
+	assert.Equal(t, 7, exitErr.ExitCode())
 }
 
-// newRoot returns a root command from NewRootCommand with the version subcommand and the given subcommands.
-func newRoot(commands ...*cobra.Command) *cobra.Command {
-	root := cli.NewRootCommand("myapp", "An example program")
+// quietCommand returns a root command that runs runE with no arguments and leaves error printing to the test.
+func quietCommand(runE func(*cobra.Command, []string) error) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "myapp",
+		RunE:          runE,
+		SilenceErrors: true,
+	}
 
-	root.AddCommand(cli.NewVersionCommand())
-	root.AddCommand(commands...)
-
-	return root
-}
-
-// execute runs root with args through cli.Execute and captures what it wrote.
-func execute(t *testing.T, root *cobra.Command, args ...string) result {
-	t.Helper()
-
-	var stdout, stderr bytes.Buffer
-
-	root.SetOut(&stdout)
-	root.SetErr(&stderr)
 	// A nil slice makes cobra parse the test binary's own arguments.
-	root.SetArgs(append([]string{}, args...))
+	cmd.SetArgs([]string{})
 
-	code := cli.Execute(t.Context(), root)
-
-	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	return cmd
 }

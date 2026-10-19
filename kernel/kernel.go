@@ -1,14 +1,15 @@
+// Package kernel turns cobra commands into running fx apps: a root command with the logging flags, and commands that
+// build each app from those flags, the program's shared modules and their own, then run it with kernelrun. Failures are
+// reported once, in the log's format, with their exit code intact.
 package kernel
 
 import (
 	"errors"
 	"fmt"
-	stdlog "log" //nolint:depguard // Run restores the log package's output, which slog.SetDefault redirects.
 	"log/slog"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 	"go.uber.org/fx"
 
 	"github.com/sikhlana/pkg/cli"
@@ -16,25 +17,6 @@ import (
 	"github.com/sikhlana/pkg/log"
 	"github.com/sikhlana/pkg/log/tint"
 )
-
-const (
-	// DebugFlag is the name of the persistent flag RootCommand adds to log from Debug up, --debug.
-	DebugFlag = "debug"
-
-	// QuietFlag is the name of the persistent flag RootCommand adds to log from Warn up, --quiet or -q.
-	QuietFlag = "quiet"
-
-	// FormatFlag is the name of the persistent flag RootCommand adds to pick the log format, --format.
-	FormatFlag = "format"
-
-	// ConfigFlag is the name of the persistent flag RootCommand adds, when Options.Config is set, to pass the config
-	// file, --config.
-	ConfigFlag = "config"
-)
-
-// ErrMissingFlag is returned by App.Run for a command whose root wasn't built by App.RootCommand. The error names the
-// first flag missing.
-var ErrMissingFlag = errors.New("missing kernel flag")
 
 // Options holds a program's developer settings, shared by every command it builds.
 type Options struct {
@@ -193,68 +175,4 @@ func checkFailed(err error) bool {
 	return errors.Is(err, kernelrun.ErrNoRunners) ||
 		errors.Is(err, kernelrun.ErrDuplicateRunner) ||
 		errors.Is(err, kernelrun.ErrInvalidRunner)
-}
-
-// flagValues holds the root's flags as Run reads them.
-type flagValues struct {
-	debug  bool
-	quiet  bool
-	format log.Format
-	config string
-}
-
-// readFlags reads the kernel's flags from flags, --config only when config is set, failing with ErrMissingFlag for the
-// first one not defined.
-func readFlags(flags *pflag.FlagSet, config bool) (flagValues, error) {
-	names := []string{DebugFlag, QuietFlag, FormatFlag}
-
-	if config {
-		names = append(names, ConfigFlag)
-	}
-
-	for _, name := range names {
-		if flags.Lookup(name) == nil {
-			return flagValues{}, fmt.Errorf("%w: %s", ErrMissingFlag, name)
-		}
-	}
-
-	var v flagValues
-
-	debug, debugErr := flags.GetBool(DebugFlag)
-	quiet, quietErr := flags.GetBool(QuietFlag)
-	formatErr := flags.GetText(FormatFlag, &v.format)
-
-	var configErr error
-
-	if config {
-		v.config, configErr = flags.GetString(ConfigFlag)
-	}
-
-	// A flag of the right name but the wrong type, defined by hand, fails here.
-	if err := errors.Join(debugErr, quietErr, formatErr, configErr); err != nil {
-		return flagValues{}, fmt.Errorf("reading flags: %w", err)
-	}
-
-	v.debug, v.quiet = debug, quiet
-
-	return v, nil
-}
-
-// swapDefaults saves slog's default logger, the log package's output and flags, and slog's level for what the log
-// package writes, raises that level to Warn, and returns a function that puts all four back.
-//
-// The log package has no levels, and what libraries write through it is mostly error reports (net/http's ErrorLog,
-// say), so Warn keeps them under --quiet. slog.SetDefault redirects the log package's output to the new logger's
-// handler, and setting back a default that writes through the log package doesn't undo that, so the output is restored
-// on its own.
-func swapDefaults() func() {
-	logger, writer, flags := slog.Default(), stdlog.Writer(), stdlog.Flags()
-	level := slog.SetLogLoggerLevel(slog.LevelWarn)
-
-	return func() {
-		slog.SetDefault(logger)
-		stdlog.SetOutput(writer)
-		stdlog.SetFlags(flags)
-		slog.SetLogLoggerLevel(level)
-	}
 }

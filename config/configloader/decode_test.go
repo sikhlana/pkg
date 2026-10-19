@@ -1,7 +1,6 @@
 package configloader_test
 
 import (
-	"errors"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -12,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sikhlana/pkg/config/configloader"
-	"github.com/sikhlana/pkg/config/configvalidator"
 )
 
 func TestDurationDecodes(t *testing.T) {
@@ -84,61 +82,6 @@ func TestBadTextDecodedValueNamesTheKeyButNotTheValue(t *testing.T) {
 	require.ErrorContains(t, err, "netip.Prefix")
 	assert.NotContains(t, err.Error(), "hunter2")
 	assert.Zero(t, cfg)
-}
-
-func TestInvalidValueIsAViolation(t *testing.T) {
-	isolate(t)
-	t.Setenv("MY_SVC_HTTP_PORT", "80")
-
-	cfg, err := configloader.Load(configloader.Options[testConfig]{
-		Name:     name,
-		Defaults: testConfig{Hosts: []string{"a"}},
-	})
-	require.ErrorContains(t, err, "validating config: http.port: fails min=1024")
-
-	violation, ok := errors.AsType[*configvalidator.Error](err)
-	require.True(t, ok)
-	assert.Equal(t, "http.port", violation.Key)
-	assert.Zero(t, cfg)
-}
-
-func TestEveryViolationIsReported(t *testing.T) {
-	isolate(t)
-
-	type config struct {
-		Host string `mapstructure:"host" validate:"required"`
-		Port int    `mapstructure:"port" validate:"min=1024"`
-	}
-
-	_, err := configloader.Load(configloader.Options[config]{Name: name})
-
-	violations, ok := errors.AsType[configvalidator.Errors](err)
-	require.True(t, ok)
-	assert.Len(t, violations, 2)
-}
-
-type MessagingConfig struct {
-	Mode string     `mapstructure:"mode" validate:"oneof=file amqp"`
-	AMQP AMQPConfig `mapstructure:"amqp" validate:"-"`
-}
-
-type AMQPConfig struct {
-	URL string `mapstructure:"url" validate:"required,url"`
-}
-
-func TestDormantModeStructLoads(t *testing.T) {
-	isolate(t)
-
-	type config struct {
-		Messaging MessagingConfig `mapstructure:"messaging"`
-	}
-
-	cfg, err := configloader.Load(configloader.Options[config]{
-		Name:     name,
-		Filename: configFile(t, "messaging:\n  mode: file\n"),
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "file", cfg.Messaging.Mode)
 }
 
 func TestBadDurationDoesntLeakTheValue(t *testing.T) {

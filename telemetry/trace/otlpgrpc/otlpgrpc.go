@@ -1,3 +1,5 @@
+// Package otlpgrpc exports telemetry/trace's spans over OTLP gRPC instead of HTTP, so only the apps that import it
+// build gRPC.
 package otlpgrpc
 
 import (

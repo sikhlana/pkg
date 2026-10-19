@@ -1,3 +1,5 @@
+// Package tint renders log's text format through tint, colouring the output only when it goes to a terminal and
+// NO_COLOR is unset. ProvideTextHandler makes it the text handler of an app that lists log.Module.
 package tint
 
 import (

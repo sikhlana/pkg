@@ -2,9 +2,12 @@ package httpserver
 
 import (
 	"cmp"
+	"fmt"
 	"net/http"
 	"reflect"
 	"slices"
+
+	"go.uber.org/fx"
 )
 
 // Middleware handles a request on its way to a handler. It calls next to pass the request on, or writes a response
@@ -95,15 +98,20 @@ func absent(m Middleware) bool {
 		return absent(o.Middleware)
 	}
 
-	if m == nil {
+	return isNil(m)
+}
+
+// isNil reports whether v is nil, or a nil pointer, func, map, slice or channel behind an interface.
+func isNil(v any) bool {
+	if v == nil {
 		return true
 	}
 
-	v := reflect.ValueOf(m)
+	rv := reflect.ValueOf(v)
 
-	switch v.Kind() { //nolint:exhaustive // Only kinds that can be nil are checked; the rest never are.
+	switch rv.Kind() { //nolint:exhaustive // Only kinds that can be nil are checked; the rest never are.
 	case reflect.Pointer, reflect.Func, reflect.Map, reflect.Slice, reflect.Chan, reflect.Interface:
-		return v.IsNil()
+		return rv.IsNil()
 	default:
 		return false
 	}
@@ -116,4 +124,32 @@ func orderOf(m Middleware) int {
 	}
 
 	return 0
+}
+
+// MiddlewareGroup returns the fx group tag the server name collects its middleware from, for injecting a server's
+// middleware elsewhere. Add to it with ProvideMiddleware: a constructor registered into the group directly isn't
+// checked against the provided servers, so a misspelled name is silently never served.
+func MiddlewareGroup(name string) string {
+	return fmt.Sprintf(`group:"httpserver:middleware:%s"`, name)
+}
+
+// ProvideMiddleware adds the middleware constructor builds to the server name's chain. constructor can take any
+// parameters fx can supply, and returns any type that implements Middleware, optionally followed by an error. It's
+// called only when the server is built. Naming a server no ProvideServer provides fails startup with
+// ErrUnknownServer, and an invalid name with ErrInvalidName. A constructor that returns a nil Middleware, as Chain
+// describes it, leaves its middleware out, for a condition known only when the server is built. anns are applied to
+// constructor after ProvideMiddleware's own, for its inputs and hooks: fx.ParamTags to take a tagged dependency,
+// fx.From, fx.OnStart, fx.OnStop. One that tags or converts the result fails startup.
+func ProvideMiddleware(name string, constructor any, anns ...fx.Annotation) fx.Option {
+	if err := checkName(name); err != nil {
+		return fx.Error(err)
+	}
+
+	return fx.Options(
+		fx.Provide(fx.Annotate(
+			constructor,
+			append([]fx.Annotation{fx.As(new(Middleware)), fx.ResultTags(MiddlewareGroup(name))}, anns...)...,
+		)),
+		fx.Supply(fx.Annotate(name, fx.ResultTags(middlewareTargets))),
+	)
 }

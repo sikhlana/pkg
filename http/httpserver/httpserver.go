@@ -23,9 +23,16 @@ var (
 	// been closed.
 	ErrNotListening = errors.New("server is not listening")
 
-	// ErrAlreadyListening is returned by Server.Listen on a server that has already bound a listener, and by
-	// Server.Serve on one that's already serving.
+	// ErrAlreadyListening is returned by Server.Listen on a server that has already bound a listener.
 	ErrAlreadyListening = errors.New("server is already listening")
+
+	// ErrAlreadyServing is returned by Server.Serve while another call is serving the same server.
+	ErrAlreadyServing = errors.New("server is already serving")
+
+	// ErrShutdownTimeout is returned by Server.Serve when connections were still active once the shutdown timeout
+	// passed, and were closed. It doesn't match context.DeadlineExceeded, so a run that ended by deadline still
+	// reports the requests it cut.
+	ErrShutdownTimeout = errors.New("shutdown timeout exceeded")
 )
 
 // state is where a Server is in its life: built, listening, serving, then closed.
@@ -119,12 +126,15 @@ func (s *Server) Listen(ctx context.Context) error {
 }
 
 // Serve serves on the listener Listen bound, over TLS when the Config enables it, until ctx ends. It returns
-// ErrNotListening before Listen or after Close, and ErrAlreadyListening while another call is serving.
+// ErrNotListening before Listen or after Close, and ErrAlreadyServing while another call is serving.
+//
+// Requests' contexts carry ctx's values, but not its cancellation: ending ctx starts the drain rather than cancelling
+// the requests in flight.
 //
 // Once ctx ends, Serve stops accepting connections and waits up to the shutdown timeout for in-flight requests, then
 // returns nil. Connections still active when the timeout passes are closed, and Serve returns an error matching
-// context.DeadlineExceeded. Any failure of the listener while serving is returned wrapped, and closes every
-// connection.
+// ErrShutdownTimeout. Any failure of the listener while serving is returned wrapped, and closes the listener and
+// every connection.
 func (s *Server) Serve(ctx context.Context) error {
 	s.mu.Lock()
 
@@ -136,7 +146,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	case stateServing:
 		s.mu.Unlock()
 
-		return ErrAlreadyListening
+		return ErrAlreadyServing
 	case stateListening:
 	}
 
@@ -150,7 +160,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.mu.Unlock()
 	}()
 
-	srv := s.httpServer()
+	srv := s.httpServer(ctx)
 	stop := make(chan struct{})
 	drained := make(chan error, 1)
 
@@ -174,6 +184,8 @@ func (s *Server) Serve(ctx context.Context) error {
 		return drainErr
 	}
 
+	// ServeTLS can fail before handing l to Serve, which is what would otherwise close it.
+	_ = l.Close()
 	_ = srv.Close()
 
 	return fmt.Errorf("serving: %w", err)
@@ -207,9 +219,11 @@ func (s *Server) Addr() net.Addr {
 	return s.listener.Addr()
 }
 
-// httpServer returns the net/http server Serve runs, with the Config's timeouts and net/http's error reports logged
-// at Debug.
-func (s *Server) httpServer() *http.Server {
+// httpServer returns the net/http server Serve runs, with the Config's timeouts, net/http's error reports logged at
+// Debug, and requests' contexts carrying ctx's values without its cancellation.
+func (s *Server) httpServer(ctx context.Context) *http.Server {
+	base := context.WithoutCancel(ctx)
+
 	return &http.Server{
 		Handler:           s.handler,
 		TLSConfig:         s.tlsConfig,
@@ -218,6 +232,7 @@ func (s *Server) httpServer() *http.Server {
 		WriteTimeout:      s.cfg.writeTimeout(),
 		IdleTimeout:       s.cfg.idleTimeout(),
 		ErrorLog:          slog.NewLogLogger(s.logger.Handler(), slog.LevelDebug),
+		BaseContext:       func(net.Listener) context.Context { return base },
 	}
 }
 
@@ -236,13 +251,22 @@ func (s *Server) drain(ctx context.Context, srv *http.Server) error {
 	s.logger.LogAttrs(ctx, slog.LevelInfo, "http server draining")
 
 	// ctx is already done; the drain needs its values but not its cancellation.
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.cfg.shutdownTimeout())
+	timeout := s.cfg.shutdownTimeout()
+
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	err := srv.Shutdown(shutdownCtx)
+
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
 		_ = srv.Close()
 
-		return fmt.Errorf("draining connections: %w", err)
+		return fmt.Errorf("%w: connections still active after %s", ErrShutdownTimeout, timeout)
+	case err != nil:
+		_ = srv.Close()
+
+		return fmt.Errorf("shutting down: %w", err)
 	}
 
 	s.logger.LogAttrs(ctx, slog.LevelDebug, "http server stopped")

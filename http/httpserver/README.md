@@ -19,25 +19,27 @@ One Config per server. configloader validates it when it loads it; the Provider 
 
 A negative timeout fails validation with ErrNegativeTimeout under its key. Plaintext servers speak HTTP/1.1 only; cleartext HTTP/2 (h2c) isn't served.
 
-**Shutdown.** When a server's runner is cancelled it stops accepting connections and waits up to shutdown_timeout for in-flight requests. Connections still active then are closed, and the runner returns an error matching context.DeadlineExceeded, which kernelrun reports as a crash: requests were cut, and the process exits non-zero. Keep shutdown_timeout below your orchestrator's grace period (Kubernetes' terminationGracePeriodSeconds, 30s by default), so the drain finishes before a SIGKILL.
+**Timeouts can't be turned off.** Zero means the default, so every server bounds reads and writes. A handler that streams (server-sent events, long polling) or takes large uploads extends its own deadlines per request with `http.ResponseController`'s `SetWriteDeadline` and `SetReadDeadline`, leaving the rest of the server protected from slow clients.
+
+**Shutdown.** When a server's runner is cancelled it stops accepting connections and waits up to shutdown_timeout for in-flight requests, whose contexts carry the runner context's values but aren't cancelled with it. Connections still active then are closed, and the runner returns an error matching ErrShutdownTimeout, which kernelrun reports as a crash: requests were cut, and the process exits non-zero. Keep shutdown_timeout below your orchestrator's grace period (Kubernetes' terminationGracePeriodSeconds, 30s by default), so the drain finishes before a SIGKILL.
 
 ## Exported Members
 
 | Name | Description |
 |------|-------------|
 | Module | Provides the Provider and checks at startup that every ProvideMiddleware names a provided server. Builds no server itself. Takes the app's *slog.Logger when there is one. |
-| ProvideServer | Provides the *Server a constructor builds under a name, wrapped in that name's middleware, its records carrying the name as the server attribute. Built only when something injects it. A name provided twice fails startup. |
+| ProvideServer | Provides the *Server a constructor builds under a name, wrapped in that name's middleware. The constructor's Provider logs with the name as the server attribute, so the server's, net/http's and tlsconfig's records carry it. Built only when something injects it. A name provided twice fails startup, and a nil *Server fails it with ErrNilServer. |
 | ProvideRunner | Opts a command in to running the named server as the kernelrun runner httpserver:name: binds in OnStart, serves in the runner, releases an unserved listener in OnStop. Fails startup with ErrUnknownServer for an unknown name. |
 | ProvideMiddleware | Adds the middleware a constructor builds to the named server's chain. The constructor returns any type implementing Middleware and runs only when the server is built. Fails startup with ErrUnknownServer for an unknown name. |
 | NameTag | Returns the name tag a server is provided under: name:"httpserver:server:NAME". |
-| MiddlewareGroup | Returns the group tag a server collects its middleware from: group:"httpserver:middleware:NAME". |
+| MiddlewareGroup | Returns the group tag a server collects its middleware from, group:"httpserver:middleware:NAME", for injecting it elsewhere. Add to it with ProvideMiddleware: registering into the group directly skips the unknown-name check. |
 | Provider | Builds a Server from a Config and a handler. Validates the Config, reads the TLS files once to build the TLS configuration, and fails for a nil handler or a key pair that can't be loaded. |
 | ProviderParams | NewProvider's input: an optional Logger. |
 | ProviderParams.Logger | Receives the servers' records, and net/http's own error reports, such as failed TLS handshakes, at Debug. Nil discards them. |
 | NewProvider | Returns a Provider whose servers log through ProviderParams.Logger. |
 | Server | An HTTP server split into Listen, Serve and Close. Building one opens no socket. Used once; safe for concurrent use. |
 | Server.Listen | Binds the configured host and port and logs http server listening at Info with the bound address. Fails with ErrAlreadyListening once the server has bound, and with net.Listen's error, which names the address, when the bind fails. |
-| Server.Serve | Serves on the bound listener, over TLS when enabled, until its context ends, then drains for up to shutdown_timeout. Returns nil after a clean drain, an error matching context.DeadlineExceeded when the drain runs out of time, and a listener failure wrapped. Fails with ErrNotListening before Listen or after Close, and ErrAlreadyListening while serving. |
+| Server.Serve | Serves on the bound listener, over TLS when enabled, until its context ends, then drains for up to shutdown_timeout. Requests' contexts carry its context's values, not its cancellation. Returns nil after a clean drain, an error matching ErrShutdownTimeout when the drain runs out of time, and a listener failure wrapped. Fails with ErrNotListening before Listen or after Close, and ErrAlreadyServing while serving. |
 | Server.Close | Releases a listener Listen bound that Serve never took over. A no-op otherwise. |
 | Server.Addr | Returns the bound address, with the real port, or nil before Listen. |
 | Config | A server's operator settings. |
@@ -56,7 +58,10 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | ErrNegativeTimeout | A negative timeout. Carried under the timeout's key. |
 | ErrNilHandler | Returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux. |
 | ErrNotListening | Server.Serve on a server that hasn't bound, or has been closed. |
-| ErrAlreadyListening | Server.Listen on a server that has bound, or Server.Serve on one that's serving. |
+| ErrAlreadyListening | Server.Listen on a server that has bound. |
+| ErrAlreadyServing | Server.Serve on a server another call is serving. |
+| ErrShutdownTimeout | Returned by Server.Serve when connections were still active once shutdown_timeout passed, and were closed. Deliberately doesn't match context.DeadlineExceeded, so kernelrun reports it as a crash however the run ended. |
+| ErrNilServer | A ProvideServer constructor returned a nil *Server without an error. Carries the name. |
 | ErrUnknownServer | A ProvideMiddleware or ProvideRunner naming no provided server. Carries the name. |
 
 ## Usage
@@ -84,30 +89,76 @@ return s.Serve(ctx)
 
 ### With fx
 
-Declare every server once, in `kernel.Options.Shared`, with `ProvideServer` and a constructor that injects the Provider, the server's own Config and its handler. Give each server's Config a name tag in the app's config, and embed `fx.Out` so configloader provides each section on its own:
+A module that serves HTTP owns its server. Its Config embeds `httpserver.Config`, squashed so the server's keys sit beside the module's own, and its `Module` provides the server with `ProvideServer` and a constructor that injects the Provider, the Config and the handler:
+
+```go
+package api
+
+// Config is the API's operator settings, the server's among them.
+type Config struct {
+	httpserver.Config `mapstructure:",squash"`
+
+	MaxUploadSize int64 `mapstructure:"max_upload_size" validate:"gte=0"`
+}
+
+var Module = fx.Module("api",
+	fx.Provide(NewHandler),
+	httpserver.ProvideServer("api", newServer),
+)
+
+type serverParams struct {
+	fx.In
+
+	Provider httpserver.Provider
+	Config   Config
+	Handler  *Handler
+}
+
+func newServer(p serverParams) (*httpserver.Server, error) {
+	return p.Provider(p.Config.Config, p.Handler)
+}
+```
+
+The app's config gives each module its section, and embeds `fx.Out` so configloader provides each one on its own. Each module's Config is its own type, so no name tags are needed:
 
 ```go
 type Config struct {
 	fx.Out
 
-	API   httpserver.Config `mapstructure:"api"   name:"api"`
-	Admin httpserver.Config `mapstructure:"admin" name:"admin"`
-}
-
-type APIServerParams struct {
-	fx.In
-
-	Provider httpserver.Provider
-	Config   httpserver.Config `name:"api"`
-	Handler  *api.Handler
-}
-
-func newAPIServer(p APIServerParams) (*httpserver.Server, error) {
-	return p.Provider(p.Config, p.Handler)
+	API   api.Config   `mapstructure:"api"`
+	Admin admin.Config `mapstructure:"admin"`
 }
 ```
 
-With `newAdminServer` written the same way, each command lists `ProvideRunner` for the servers it runs. A command that neither runs nor injects a server never builds it, its middleware or its TLS configuration, and never binds its port:
+```toml
+[api]
+port = 8443
+max_upload_size = 10485760
+
+[api.tls]
+enabled = true
+cert_file = "/etc/notary/tls/tls.crt"
+key_file = "/etc/notary/tls/tls.key"
+
+[admin]
+host = "127.0.0.1"
+port = 9090
+```
+
+Loaded under `notary`, the env names follow the keys: `NOTARY_API_PORT`, `NOTARY_API_MAX_UPLOAD_SIZE`, `NOTARY_API_TLS_CERT_FILE`.
+
+Embedding `httpserver.Config` gives `api.Config` its `Validate` method, so configvalidator calls it for the whole `api` section and looks no deeper for other `Validate` methods; tags on every field still run. When the module's Config holds another section with its own `Validate`, give the Config a `Validate` that checks both (see configvalidator's [Embedding a Validator](../../config/configvalidator/README.md#embedding-a-validator)):
+
+```go
+func (c Config) Validate() error {
+	return errors.Join(
+		configvalidator.ValidateField(&c, &c.Config),
+		configvalidator.ValidateField(&c, &c.Storage),
+	)
+}
+```
+
+The app lists the modules once, in `kernel.Options.Shared`, and each command lists `ProvideRunner` for the servers it runs. A command that neither runs nor injects a server never builds it, its middleware or its TLS configuration, and never binds its port:
 
 ```go
 app := kernel.New(kernel.Options{
@@ -117,9 +168,8 @@ app := kernel.New(kernel.Options{
 	},
 	Shared: fx.Options(
 		httpserver.Module,
-		httpserver.ProvideServer("api", newAPIServer),
-		httpserver.ProvideServer("admin", newAdminServer),
 		api.Module,
+		admin.Module,
 	),
 })
 
@@ -207,4 +257,4 @@ A `ProvideMiddleware` or `ProvideRunner` whose name matches no `ProvideServer` f
 
 #### Logging
 
-Records go through the app's `*slog.Logger`, each carrying the server's name as `server`: `http server listening` at Info with the bound `address`, `http server draining` at Info when the runner is cancelled, and `http server stopped` at Debug after a clean drain. net/http's own error reports, such as TLS handshakes from scanners, are logged at Debug through the same logger and never reach the standard library's `log` package. tlsconfig logs key pair loads and rotations with their file paths.
+Records go through the app's `*slog.Logger`, each carrying the server's name as `server`: `http server listening` at Info with the bound `address`, `http server draining` at Info when the runner is cancelled, and `http server stopped` at Debug after a clean drain. net/http's own error reports, such as TLS handshakes from scanners, are logged at Debug through the same logger and never reach the standard library's `log` package. tlsconfig logs key pair loads and rotations with their file paths, through the same named logger, so with several TLS servers each rotation names its server.

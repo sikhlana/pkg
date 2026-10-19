@@ -122,7 +122,7 @@ func TestServeTwice(t *testing.T) {
 	status, _ := get(t, s.Addr())
 	require.Equal(t, http.StatusOK, status)
 
-	require.ErrorIs(t, s.Serve(t.Context()), httpserver.ErrAlreadyListening)
+	require.ErrorIs(t, s.Serve(t.Context()), httpserver.ErrAlreadyServing)
 	require.NoError(t, s.Close(), "a no-op while serving")
 
 	status, _ = get(t, s.Addr())
@@ -261,7 +261,9 @@ func TestDrainRunsOutOfTime(t *testing.T) {
 	<-entered
 	cancel()
 
-	require.ErrorIs(t, waitFor(t, done), context.DeadlineExceeded)
+	err := waitFor(t, done)
+	require.ErrorIs(t, err, httpserver.ErrShutdownTimeout)
+	require.NotErrorIs(t, err, context.DeadlineExceeded, "kernelrun would read a deadline as a clean end")
 	assert.Error(t, waitFor(t, failed), "the connection was closed under the request")
 }
 
@@ -482,4 +484,75 @@ func TestLogsAFailedHandshakeAtDebug(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 
 	assert.Empty(t, stdlog.String())
+}
+
+func TestServeReleasesTheListenerWhenTLSFailsToStart(t *testing.T) {
+	t.Parallel()
+
+	ca := newAuthority(t)
+	pair := ca.issue(t, t.TempDir())
+
+	s := build(t, httpserver.Config{
+		Host: "127.0.0.1",
+		TLS:  tlsconfig.ServerConfig{Enabled: true, CertFile: pair.CertFile, KeyFile: pair.KeyFile},
+	}, ok, nil)
+
+	require.NoError(t, s.Listen(t.Context()))
+
+	addr := s.Addr().String()
+
+	httpserver.DropCertificates(s)
+	require.Error(t, s.Serve(t.Context()), "ServeTLS fails loading a key pair from empty file names")
+
+	var lc net.ListenConfig
+
+	l, err := lc.Listen(t.Context(), "tcp", addr)
+	require.NoError(t, err, "the address is free again")
+	require.NoError(t, l.Close())
+}
+
+// valueKey keys the value TestRequestContextsCarryServeValues puts in Serve's context.
+type valueKey struct{}
+
+func TestRequestContextsCarryServeValues(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{}, 1)
+	seen := make(chan any, 1)
+	cancelled := make(chan bool, 1)
+	release := make(chan struct{})
+
+	s := listening(t, httpserver.Config{ShutdownTimeout: 5 * time.Second}, http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			seen <- r.Context().Value(valueKey{})
+
+			entered <- struct{}{}
+
+			<-release
+
+			cancelled <- r.Context().Err() != nil
+
+			_, _ = io.WriteString(w, "done")
+		},
+	))
+
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), valueKey{}, "from serve"))
+	done := serving(ctx, s)
+	results := make(chan error, 1)
+
+	go func() {
+		_, _, err := fetch(t.Context(), s.Addr())
+
+		results <- err
+	}()
+
+	<-entered
+	assert.Equal(t, "from serve", <-seen)
+
+	cancel()
+	close(release)
+
+	assert.False(t, <-cancelled, "ending Serve's context drains the request rather than cancelling it")
+	require.NoError(t, waitFor(t, results))
+	require.NoError(t, waitFor(t, done))
 }

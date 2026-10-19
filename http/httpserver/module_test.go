@@ -414,6 +414,26 @@ func TestRecordsCarryTheServerName(t *testing.T) {
 	require.NotNil(t, handshake)
 	assert.Equal(t, slog.LevelDebug, handshake.Level)
 	assert.Equal(t, "api", handshake.Attrs["server"])
+
+	loaded, found := rec.find("tls server key pair loaded")
+	require.True(t, found)
+	assert.Equal(t, "api", loaded.Attrs["server"], "tlsconfig's records carry the name too")
+}
+
+func TestNilServerFailsStartup(t *testing.T) {
+	t.Parallel()
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{},
+			httpserver.ProvideServer("api", func() (*httpserver.Server, error) {
+				return nil, nil //nolint:nilnil // the misuse under test
+			}),
+		),
+		httpserver.ProvideRunner("api"),
+	)
+
+	require.ErrorIs(t, err, httpserver.ErrNilServer)
+	assert.Contains(t, err.Error(), `"api"`)
 }
 
 // handshakeRecord returns net/http's record of a failed TLS handshake, or nil.

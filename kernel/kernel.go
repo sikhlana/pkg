@@ -1,3 +1,6 @@
+// Package kernel turns cobra commands into running fx apps: a root command with the logging flags, and commands that
+// build each app from those flags, the program's shared modules and their own, then run it with kernelrun. Failures are
+// reported once, in the log's format, with their exit code intact.
 package kernel
 
 import (

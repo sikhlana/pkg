@@ -4,6 +4,7 @@ use (
 	./cli
 	./config/configloader
 	./config/configvalidator
+	./http/httpserver
 	./kernel
 	./kernelrun
 	./log

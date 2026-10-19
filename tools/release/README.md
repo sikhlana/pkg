@@ -29,11 +29,15 @@ It prints a markdown report, one row per changed module plus each gorelease repo
 
 By default it builds the gorelease version `go.mod` pins, the first time a module needs it; `--gorelease <path>` uses a prebuilt binary instead.
 
+It checks up to `--jobs` modules at once, by default `GOMAXPROCS`. When a module can't be checked at all (git or gorelease failing to run, not a broken rule), the others are still checked, and the command fails with every such module's error.
+
 ### publish
 
 For every library module whose tag for `VERSION` has no GitHub release, creates one titled with the tag, and never asks GitHub to make it the latest release. GitHub still shows the newest full release as latest when none is marked, so the badge follows whichever module released most recently. A new tag points at `HEAD`; a tag that exists without a release keeps its commit. `VERSION` files are read from the working tree, so `publish` refuses to run when tracked files differ from `HEAD`, and it refuses a `VERSION` whose major the module path doesn't take. The notes list the subjects of commits touching the module's directory (not its nested modules) since its previous release, or every such commit for a first release. Each new version is then requested from proxy.golang.org; a failure there is a warning, not an error.
 
 Versions that already have a release are left alone, so a re-run changes nothing, and a failed run is repaired by the next push that leaves the module's `VERSION` unchanged. If a later merge bumps it again first, the unreleased version is skipped: Go is fine with the gap, and the next release includes its changes. `publish` warns about each skipped version. It needs `GITHUB_TOKEN`, with `contents: write`, and `GITHUB_REPOSITORY`.
+
+Every request to GitHub, looking up a release or creating one, runs one at a time, in module order. What doesn't touch GitHub runs up to `--jobs` at once, by default `GOMAXPROCS`: the new versions' release notes, read from git, and, once every release is created, their announcements to the proxy. An announcement that panicked, or never ran because the run was interrupted, shows as a proxy warning, like any other proxy failure, though an interrupted run still fails.
 
 ### vulncheck
 
@@ -50,7 +54,7 @@ It then keeps one open issue labelled `govulncheck` in step with the findings:
 
 Finding vulnerabilities doesn't fail the command; the issue is the alert. A scan that fails to run does, before the issue is touched; the job summary still shows what the other modules' scans found, marked incomplete. It needs `GITHUB_TOKEN`, with `issues: write`, and `GITHUB_REPOSITORY`; the closing comment links the run through `GITHUB_SERVER_URL` and `GITHUB_RUN_ID`.
 
-`--govulncheck <path>` names the binary, by default the one on `PATH`. `--dry-run` prints the report and leaves the issue alone, so it needs no token.
+`--govulncheck <path>` names the binary, by default the one on `PATH`. `--dry-run` prints the report and leaves the issue alone, so it needs no token. `--jobs` bounds how many modules and tools are scanned at once, by default `GOMAXPROCS`.
 
 ## In CI
 

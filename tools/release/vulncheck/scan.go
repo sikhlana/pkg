@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sikhlana/pkg/tools/release/parallel"
 	"github.com/sikhlana/pkg/tools/release/workspace"
 )
 
@@ -79,25 +80,31 @@ func Dirs(ws workspace.Workspace) ([]string, error) {
 	return append(ws.Dirs(), tools...), nil
 }
 
-// Scan runs run in each of dirs, relative to root, and returns a Result per
-// directory in the same order. A directory whose scan fails doesn't stop the
-// others: Scan returns the results of the ones that completed together with
-// an error joining every failure, so a caller can still report them, marked
-// incomplete. A caller must not treat a partial scan as complete: it would
-// read as fixed advisories.
-func Scan(ctx context.Context, root string, dirs []string, run RunFunc) ([]Result, error) {
+// Scan runs run in each of dirs, relative to root, up to jobs at once, and
+// returns a Result per directory in the same order. Jobs below 1 mean 1. A
+// directory whose scan fails doesn't stop the others: Scan returns the
+// results of the ones that completed together with an error joining every
+// failure, so a caller can still report them, marked incomplete. A caller
+// must not treat a partial scan as complete: it would read as fixed
+// advisories.
+func Scan(ctx context.Context, root string, dirs []string, jobs int, run RunFunc) ([]Result, error) {
+	scans := parallel.Map(ctx, jobs, dirs, func(ctx context.Context, dir string) ([]Advisory, error) {
+		return scanDir(ctx, root, dir, run)
+	})
+
 	results := make([]Result, 0, len(dirs))
 
 	var errs []error
 
-	for _, dir := range dirs {
-		advisories, err := scanDir(ctx, root, dir, run)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("scanning %s: %w", dir, err))
+	for i, s := range scans {
+		// A scan that never ran, or panicked, fails like any other: it has no
+		// findings to report, but isn't clean either.
+		if s.Err != nil {
+			errs = append(errs, fmt.Errorf("scanning %s: %w", dirs[i], s.Err))
 			continue
 		}
 
-		results = append(results, Result{Dir: dir, Advisories: advisories})
+		results = append(results, Result{Dir: dirs[i], Advisories: s.Value})
 	}
 
 	if len(errs) > 0 {

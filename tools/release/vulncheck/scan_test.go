@@ -5,12 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sikhlana/pkg/tools/release/fixture"
+	"github.com/sikhlana/pkg/tools/release/parallel"
 	"github.com/sikhlana/pkg/tools/release/vulncheck"
 	"github.com/sikhlana/pkg/tools/release/workspace"
 )
@@ -105,6 +107,7 @@ func TestScan(t *testing.T) {
 		t.Context(),
 		t.TempDir(),
 		[]string{"logger", "tools/release"},
+		4,
 		runs(map[string][]byte{
 			"logger":  recorded(t),
 			"release": nil,
@@ -123,6 +126,7 @@ func TestScanFailsOnAnyError(t *testing.T) {
 		t.Context(),
 		t.TempDir(),
 		[]string{"logger", "kernel", "cli"},
+		4,
 		runs(map[string][]byte{
 			"logger": recorded(t),
 			"cli":    []byte("{"),
@@ -135,4 +139,65 @@ func TestScanFailsOnAnyError(t *testing.T) {
 	require.ErrorContains(t, err, "scanning cli: decoding govulncheck output")
 	assert.Equal(t, []vulncheck.Result{{Dir: "logger", Advisories: []vulncheck.Advisory{reachable}}}, results,
 		"the scans that completed are still returned, for an incomplete report")
+}
+
+func TestScanOverlaps(t *testing.T) {
+	dirs := []string{"cli", "kernel", "logger"}
+
+	var wg sync.WaitGroup
+
+	wg.Add(len(dirs))
+
+	// Every scan waits for all of them to start, so they can only finish
+	// by running at once.
+	results, err := vulncheck.Scan(
+		t.Context(),
+		t.TempDir(),
+		dirs,
+		len(dirs),
+		func(context.Context, string) ([]byte, error) {
+			wg.Done()
+			wg.Wait()
+
+			return nil, nil
+		},
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []vulncheck.Result{{Dir: "cli"}, {Dir: "kernel"}, {Dir: "logger"}}, results)
+}
+
+func TestScanCancelledKeepsWhatCompleted(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	results, err := vulncheck.Scan(ctx, t.TempDir(), []string{"logger", "kernel"}, 1,
+		func(context.Context, string) ([]byte, error) {
+			// logger finishes, then the run is interrupted before kernel starts.
+			cancel()
+
+			return recorded(t), nil
+		})
+
+	require.ErrorIs(t, err, vulncheck.ErrIncomplete)
+	require.ErrorIs(t, err, parallel.ErrNotRun)
+	require.ErrorContains(t, err, "scanning kernel")
+	assert.Equal(t, []vulncheck.Result{{Dir: "logger", Advisories: []vulncheck.Advisory{reachable}}}, results,
+		"the completed scan is kept, and the one that never ran isn't reported as clean")
+}
+
+func TestScanPanicKeepsTheOthers(t *testing.T) {
+	results, err := vulncheck.Scan(t.Context(), t.TempDir(), []string{"logger", "kernel", "cli"}, 2,
+		func(_ context.Context, dir string) ([]byte, error) {
+			if filepath.Base(dir) == "kernel" {
+				panic("boom")
+			}
+
+			return nil, nil
+		})
+
+	require.ErrorIs(t, err, vulncheck.ErrIncomplete)
+	require.ErrorIs(t, err, parallel.ErrPanic)
+	require.ErrorContains(t, err, "scanning kernel: panicked: boom")
+	assert.Equal(t, []vulncheck.Result{{Dir: "logger"}, {Dir: "cli"}}, results)
 }

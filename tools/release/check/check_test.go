@@ -2,6 +2,9 @@ package check_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,9 +13,12 @@ import (
 	"github.com/sikhlana/pkg/tools/release/check"
 	"github.com/sikhlana/pkg/tools/release/fixture"
 	"github.com/sikhlana/pkg/tools/release/git"
+	"github.com/sikhlana/pkg/tools/release/gorelease"
 	"github.com/sikhlana/pkg/tools/release/report"
 	"github.com/sikhlana/pkg/tools/release/workspace"
 )
+
+var errBuild = errors.New("building gorelease failed")
 
 // setup returns a repository with logger at 0.3.0 committed on main and
 // checked out on a feature branch.
@@ -40,7 +46,7 @@ func run(t *testing.T, f fixture.Repo) check.Report {
 	ws, err := workspace.Load(f.Root)
 	require.NoError(t, err)
 
-	r, err := check.Run(t.Context(), check.Options{Repo: repo, Workspace: ws, Base: "main"})
+	r, err := check.Run(t.Context(), check.Options{Repo: repo, Workspace: ws, Base: "main", Jobs: 4})
 	require.NoError(t, err)
 
 	return r
@@ -286,4 +292,36 @@ func TestVersionRuleFailureSkipsTheTagCheck(t *testing.T) {
 	r := run(t, f)
 
 	assert.Equal(t, []string{"logger changed without a VERSION bump: still 0.3.0, as on main"}, messages(r))
+}
+
+func TestEveryModuleThatCantBeCheckedIsReported(t *testing.T) {
+	f := setup(t)
+	f.Write("logger/VERSION", "0.3.1\n")
+	f.AddModule("metrics", "0.1.0")
+	f.Commit("Change")
+
+	repo, err := git.Open(t.Context(), f.Root)
+	require.NoError(t, err)
+
+	ws, err := workspace.Load(f.Root)
+	require.NoError(t, err)
+
+	var builds atomic.Int64
+
+	r, err := check.Run(t.Context(), check.Options{
+		Repo:      repo,
+		Workspace: ws,
+		Base:      "main",
+		Jobs:      2,
+		Gorelease: func(context.Context) (gorelease.Runner, error) {
+			builds.Add(1)
+			return gorelease.Runner{}, errBuild
+		},
+	})
+
+	require.ErrorIs(t, err, errBuild)
+	require.ErrorContains(t, err, "checking logger: "+errBuild.Error())
+	require.ErrorContains(t, err, "checking metrics: "+errBuild.Error())
+	assert.Equal(t, check.Report{}, r)
+	assert.Equal(t, int64(1), builds.Load(), "gorelease is built once, whichever module needs it first")
 }

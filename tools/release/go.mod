@@ -3,6 +3,7 @@ module github.com/sikhlana/pkg/tools/release
 go 1.27
 
 require (
+	github.com/alitto/pond/v2 v2.7.3
 	github.com/google/go-github/v93 v93.0.0
 	github.com/sethvargo/go-githubactions v1.4.0
 	github.com/spf13/cobra v1.10.2

@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/google/go-github/v93/github"
@@ -17,6 +19,7 @@ import (
 	"github.com/sikhlana/pkg/tools/release/check"
 	"github.com/sikhlana/pkg/tools/release/git"
 	"github.com/sikhlana/pkg/tools/release/gorelease"
+	"github.com/sikhlana/pkg/tools/release/parallel"
 	"github.com/sikhlana/pkg/tools/release/plan"
 	"github.com/sikhlana/pkg/tools/release/publish"
 	"github.com/sikhlana/pkg/tools/release/report"
@@ -27,6 +30,7 @@ import (
 var (
 	errCheckFailed = errors.New("release check failed")
 	errDirtyTree   = errors.New("the working tree has uncommitted changes to tracked files")
+	errJobs        = errors.New("--jobs must be at least 1")
 	errNoToken     = errors.New("GITHUB_TOKEN is empty; set it, or pass --dry-run")
 )
 
@@ -39,8 +43,38 @@ func main() {
 
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "release:", err)
+		printPanicStack(os.Stderr, err)
 
 		os.Exit(1)
+	}
+}
+
+// printPanicStack writes the stack of every panic err carries, since a
+// parallel.PanicError's message leaves it out.
+func printPanicStack(w io.Writer, err error) {
+	for _, panicErr := range panics(err) {
+		_, _ = fmt.Fprintf(w, "%s", panicErr.Stack)
+	}
+}
+
+// panics returns every *parallel.PanicError in err's tree, depth first, since
+// errors.As finds only the first and a joined error can hold several.
+func panics(err error) []*parallel.PanicError {
+	switch e := err.(type) { //nolint:errorlint // Walks the tree itself.
+	case nil:
+		return nil
+	case *parallel.PanicError:
+		return []*parallel.PanicError{e}
+	case interface{ Unwrap() []error }:
+		var out []*parallel.PanicError
+
+		for _, inner := range e.Unwrap() {
+			out = append(out, panics(inner)...)
+		}
+
+		return out
+	default:
+		return panics(errors.Unwrap(err))
 	}
 }
 
@@ -97,7 +131,10 @@ func newPlanCommand() *cobra.Command {
 }
 
 func newCheckCommand() *cobra.Command {
-	var base, goreleasePath string
+	var (
+		base, goreleasePath string
+		jobs                *int
+	)
 
 	cmd := &cobra.Command{
 		Use:   "check",
@@ -109,15 +146,6 @@ func newCheckCommand() *cobra.Command {
 				return err
 			}
 
-			// Created only when check builds gorelease itself.
-			var tmp string
-
-			defer func() {
-				if tmp != "" {
-					_ = os.RemoveAll(tmp)
-				}
-			}()
-
 			// gorelease runs in each module's directory, so a relative path would break.
 			if goreleasePath != "" {
 				if goreleasePath, err = filepath.Abs(goreleasePath); err != nil {
@@ -125,17 +153,26 @@ func newCheckCommand() *cobra.Command {
 				}
 			}
 
+			// Where check builds gorelease when it isn't given one. Made up front, so the
+			// build, which runs on a check worker, writes nothing this function reads.
+			var tmp string
+
+			if goreleasePath == "" {
+				if tmp, err = os.MkdirTemp("", "release-gorelease-"); err != nil {
+					return fmt.Errorf("creating temporary directory: %w", err)
+				}
+
+				defer func() { _ = os.RemoveAll(tmp) }()
+			}
+
 			r, err := check.Run(cmd.Context(), check.Options{
 				Repo:      repo,
 				Workspace: ws,
 				Base:      base,
+				Jobs:      *jobs,
 				Gorelease: func(ctx context.Context) (gorelease.Runner, error) {
 					if goreleasePath != "" {
 						return gorelease.Runner{Path: goreleasePath}, nil
-					}
-
-					if tmp, err = os.MkdirTemp("", "release-gorelease-"); err != nil {
-						return gorelease.Runner{}, fmt.Errorf("creating temporary directory: %w", err)
 					}
 
 					return gorelease.Build(
@@ -165,11 +202,15 @@ func newCheckCommand() *cobra.Command {
 	cmd.Flags().StringVar(&goreleasePath, "gorelease", "",
 		"a prebuilt gorelease binary; by default check builds the version go.mod pins")
 
+	jobs = jobsFlag(cmd, "how many modules to check at once")
+
 	return cmd
 }
 
 func newPublishCommand() *cobra.Command {
-	return &cobra.Command{
+	var jobs *int
+
+	cmd := &cobra.Command{
 		Use:   "publish",
 		Short: "Create a release, on HEAD, for every module version that has none",
 		Args:  cobra.NoArgs,
@@ -210,6 +251,7 @@ func newPublishCommand() *cobra.Command {
 				Workspace: ws,
 				SHA:       commit,
 				Releases:  releases,
+				Jobs:      *jobs,
 			})
 
 			w := report.New(cmd.OutOrStdout(), os.Getenv)
@@ -222,18 +264,28 @@ func newPublishCommand() *cobra.Command {
 
 				if o.ProxyErr != nil {
 					w.Warning(o.ProxyErr.Error())
+					printPanicStack(cmd.ErrOrStderr(), o.ProxyErr)
 				}
 			}
 
 			return err
 		},
 	}
+
+	jobs = jobsFlag(
+		cmd,
+		"how many modules to read, and versions to announce, at once; releases are created one at a time",
+	)
+
+	return cmd
 }
 
 func newVulncheckCommand() *cobra.Command {
-	var govulncheckPath string
-
-	var dryRun bool
+	var (
+		govulncheckPath string
+		dryRun          bool
+		jobs            *int
+	)
 
 	cmd := &cobra.Command{
 		Use:   "vulncheck",
@@ -255,6 +307,7 @@ func newVulncheckCommand() *cobra.Command {
 				Workspace: ws,
 				Run:       scanner.Run,
 				RunURL:    vulncheck.RunURL(os.Getenv),
+				Jobs:      *jobs,
 			}
 
 			if !dryRun {
@@ -291,7 +344,47 @@ func newVulncheckCommand() *cobra.Command {
 		"the govulncheck binary, by default the one on PATH")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "write the report but leave the issue alone; needs no token")
 
+	jobs = jobsFlag(cmd, "how many modules and tools to scan at once")
+
 	return cmd
+}
+
+// jobsFlag adds --jobs to cmd, defaulting to GOMAXPROCS, and returns where
+// its value lands. A value below 1 fails as the flag is parsed, before cmd
+// does any work.
+func jobsFlag(cmd *cobra.Command, usage string) *int {
+	n := runtime.GOMAXPROCS(0)
+	cmd.Flags().Var(jobsValue{n: &n}, "jobs", usage)
+
+	return &n
+}
+
+// jobsValue is --jobs: a count of at least 1, checked when it's set.
+type jobsValue struct {
+	n *int
+}
+
+func (v jobsValue) Set(s string) error {
+	n, err := strconv.Atoi(s)
+
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w, not %q", errJobs, s)
+	case n < 1:
+		return fmt.Errorf("%w, not %d", errJobs, n)
+	}
+
+	*v.n = n
+
+	return nil
+}
+
+func (v jobsValue) String() string {
+	return strconv.Itoa(*v.n)
+}
+
+func (jobsValue) Type() string {
+	return "int"
 }
 
 // newTracker returns the GitHub tracker, failing without a token, so a run

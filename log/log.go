@@ -1,7 +1,6 @@
 package log
 
 import (
-	"cmp"
 	"fmt"
 	"io"
 	"log/slog"
@@ -97,21 +96,4 @@ func isNil(w io.Writer) bool {
 	v := reflect.ValueOf(w)
 
 	return slices.Contains(nilableKinds, v.Kind()) && v.IsNil()
-}
-
-// sortMiddleware returns the middleware ordered by Order, keeping the given order between equal ones.
-func sortMiddleware(middleware []OrderedMiddleware) []Middleware {
-	sorted := slices.SortedStableFunc(slices.Values(middleware), func(a, b OrderedMiddleware) int {
-		return cmp.Compare(a.Order, b.Order)
-	})
-
-	out := make([]Middleware, 0, len(sorted))
-
-	for _, m := range sorted {
-		if m.Middleware != nil {
-			out = append(out, m.Middleware)
-		}
-	}
-
-	return out
 }

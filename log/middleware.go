@@ -1,6 +1,7 @@
 package log
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"slices"
@@ -43,6 +44,23 @@ func chain(middleware []Middleware, base slog.Handler) func(context.Context, slo
 	}
 
 	return next
+}
+
+// sortMiddleware returns the middleware ordered by Order, keeping the given order between equal ones.
+func sortMiddleware(middleware []OrderedMiddleware) []Middleware {
+	sorted := slices.SortedStableFunc(slices.Values(middleware), func(a, b OrderedMiddleware) int {
+		return cmp.Compare(a.Order, b.Order)
+	})
+
+	out := make([]Middleware, 0, len(sorted))
+
+	for _, m := range sorted {
+		if m.Middleware != nil {
+			out = append(out, m.Middleware)
+		}
+	}
+
+	return out
 }
 
 // MiddlewareGroup is the fx group tag New collects OrderedMiddleware from. WithMiddleware and ProvideMiddleware

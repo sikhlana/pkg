@@ -154,3 +154,38 @@ func values(objects []map[string]any, key string) []any {
 
 	return out
 }
+
+type requestIDKey struct{}
+
+// addRequestID is a middleware that adds the context's request id at the top level.
+func addRequestID(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		r.AddAttrs(slog.String("request_id", id))
+	}
+
+	return next(ctx, r)
+}
+
+// adding returns a middleware that adds attrs to every record.
+func adding(attrs ...slog.Attr) log.Middleware {
+	return func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
+		r.AddAttrs(attrs...)
+
+		return next(ctx, r)
+	}
+}
+
+// counting returns a middleware that counts the records it sees and passes them on.
+func counting(n *int) log.Middleware {
+	return func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
+		*n++
+
+		return next(ctx, r)
+	}
+}
+
+func withRequestID(t *testing.T, id string) context.Context {
+	t.Helper()
+
+	return context.WithValue(t.Context(), requestIDKey{}, id)
+}

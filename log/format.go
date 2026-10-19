@@ -1,13 +1,11 @@
 package log
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
-)
 
-// ErrUnknownFormat reports a Format other than FormatJSON and FormatText, from decoding a name or from New.
-var ErrUnknownFormat = errors.New("unknown log format")
+	"go.uber.org/fx"
+)
 
 // Format selects how records are written. Its zero value is FormatJSON, so an unset format writes JSON.
 type Format int
@@ -55,4 +53,14 @@ func (f *Format) UnmarshalText(text []byte) error {
 	}
 
 	return nil
+}
+
+// AsFormat annotates v, a Format or a constructor returning one, as New's Format. Wrap it in fx.Supply or fx.Provide.
+func AsFormat(v any) any {
+	return fx.Annotate(v, fx.ResultTags(`name:"log:format"`))
+}
+
+// WithFormat supplies New's Format.
+func WithFormat(format Format) fx.Option {
+	return fx.Supply(AsFormat(format))
 }

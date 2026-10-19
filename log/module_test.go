@@ -61,32 +61,6 @@ func TestAsDestinationTakesAValue(t *testing.T) {
 	assert.Equal(t, []any{"to the buffer"}, values(decodeLines(t, buf.Bytes()), slog.MessageKey))
 }
 
-func TestProvideMiddlewareTwiceInOneApp(t *testing.T) {
-	var logger *slog.Logger
-
-	rec := &recording{t: t}
-
-	app := fxtest.New(t,
-		log.Module,
-		log.WithFormat(log.FormatText),
-		log.WithTextHandler(rec.provide),
-		log.ProvideMiddleware(20, func() log.Middleware {
-			return adding(slog.String("step", "second"))
-		}),
-		fx.Module("nested", log.ProvideMiddleware(10, func() log.Middleware {
-			return adding(slog.String("step", "first"))
-		})),
-		fx.Populate(&logger),
-	)
-	app.RequireStart()
-
-	logger.InfoContext(t.Context(), "twice")
-
-	app.RequireStop()
-
-	assert.Equal(t, []string{"[step=first step=second]"}, rec.attrs())
-}
-
 func TestAsTextHandlerTakesAConstructor(t *testing.T) {
 	var logger *slog.Logger
 

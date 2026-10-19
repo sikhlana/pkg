@@ -32,16 +32,6 @@ func WithQuiet(quiet bool) fx.Option {
 	return fx.Supply(AsQuiet(quiet))
 }
 
-// AsFormat annotates v, a Format or a constructor returning one, as New's Format. Wrap it in fx.Supply or fx.Provide.
-func AsFormat(v any) any {
-	return fx.Annotate(v, fx.ResultTags(`name:"log:format"`))
-}
-
-// WithFormat supplies New's Format.
-func WithFormat(format Format) fx.Option {
-	return fx.Supply(AsFormat(format))
-}
-
 // AsDestination annotates v, a writer or a constructor returning one of any concrete writer type, as New's
 // Destination. Wrap it in fx.Supply or fx.Provide.
 func AsDestination(v any) any {

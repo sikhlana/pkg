@@ -13,45 +13,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/fx"
-	"go.uber.org/fx/fxtest"
 
 	"github.com/sikhlana/pkg/log"
 )
-
-type requestIDKey struct{}
-
-// addRequestID is a middleware that adds the context's request id at the top level.
-func addRequestID(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
-	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
-		r.AddAttrs(slog.String("request_id", id))
-	}
-
-	return next(ctx, r)
-}
-
-// adding returns a middleware that adds attrs to every record.
-func adding(attrs ...slog.Attr) log.Middleware {
-	return func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
-		r.AddAttrs(attrs...)
-
-		return next(ctx, r)
-	}
-}
-
-// counting returns a middleware that counts the records it sees and passes them on.
-func counting(n *int) log.Middleware {
-	return func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
-		*n++
-
-		return next(ctx, r)
-	}
-}
-
-// dropping is a middleware that drops every record.
-func dropping(context.Context, slog.Record, func(context.Context, slog.Record) error) error {
-	return nil
-}
 
 // redacting is a middleware that replaces the value of every top-level token attribute.
 func redacting(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
@@ -68,12 +32,6 @@ func redacting(ctx context.Context, r slog.Record, next func(context.Context, sl
 	})
 
 	return next(ctx, out)
-}
-
-func withRequestID(t *testing.T, id string) context.Context {
-	t.Helper()
-
-	return context.WithValue(t.Context(), requestIDKey{}, id)
 }
 
 func TestHandlerConformance(t *testing.T) {
@@ -103,16 +61,6 @@ func TestHandlerConformance(t *testing.T) {
 	)
 }
 
-func TestMiddlewareSeesTheContext(t *testing.T) {
-	logger, rec := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Middleware: addRequestID}},
-	})
-
-	logger.InfoContext(withRequestID(t, "r1"), "served")
-
-	assert.Equal(t, []string{"[request_id=r1]"}, rec.attrs())
-}
-
 func TestMiddlewareRunsOnADerivedLogger(t *testing.T) {
 	var n int
 
@@ -140,16 +88,6 @@ func TestMiddlewareRunsOnARecordHandedToTheHandler(t *testing.T) {
 	assert.Len(t, rec.all(), 1)
 }
 
-func TestMiddlewareDropsARecord(t *testing.T) {
-	logger, rec := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Middleware: dropping}},
-	})
-
-	logger.InfoContext(t.Context(), "dropped")
-
-	assert.Empty(t, rec.all())
-}
-
 func TestMiddlewareNeverSeesARecordBelowTheLevel(t *testing.T) {
 	var n int
 
@@ -160,79 +98,6 @@ func TestMiddlewareNeverSeesARecordBelowTheLevel(t *testing.T) {
 	logger.DebugContext(t.Context(), "hidden")
 
 	assert.Zero(t, n)
-}
-
-func TestMiddlewareOrder(t *testing.T) {
-	t.Run("a higher order sees a lower one's attribute", func(t *testing.T) {
-		var seen []string
-
-		logger, _ := newRecorded(t, log.Params{
-			Middleware: []log.OrderedMiddleware{
-				{
-					Order: 20,
-					Middleware: func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
-						r.Attrs(func(a slog.Attr) bool {
-							seen = append(seen, a.String())
-
-							return true
-						})
-
-						return next(ctx, r)
-					},
-				},
-				{Order: 10, Middleware: adding(slog.String("added", "at 10"))},
-			},
-		})
-
-		logger.InfoContext(t.Context(), "ordered")
-
-		assert.Equal(t, []string{"added=at 10"}, seen)
-	})
-
-	t.Run("a lower order drops", func(t *testing.T) {
-		var n int
-
-		logger, rec := newRecorded(t, log.Params{
-			Middleware: []log.OrderedMiddleware{
-				{Order: 20, Middleware: counting(&n)},
-				{Order: 10, Middleware: dropping},
-			},
-		})
-
-		logger.InfoContext(t.Context(), "dropped")
-
-		assert.Zero(t, n)
-		assert.Empty(t, rec.all())
-	})
-}
-
-// order is a value the graph supplies to a middleware constructor.
-type order int
-
-func TestMiddlewareValuesAndConstructorsAreOrderedTogether(t *testing.T) {
-	var logger *slog.Logger
-
-	rec := &recording{t: t}
-
-	app := fxtest.New(t,
-		log.Module,
-		log.WithFormat(log.FormatText),
-		log.WithTextHandler(rec.provide),
-		log.WithMiddleware(20, adding(slog.Int("order", 20))),
-		fx.Supply(order(15)),
-		log.ProvideMiddleware(15, func(o order) log.Middleware {
-			return adding(slog.Int("order", int(o)))
-		}),
-		log.WithMiddleware(10, adding(slog.Int("order", 10))),
-		fx.Populate(&logger),
-	)
-	app.RequireStart()
-
-	logger.InfoContext(t.Context(), "ordered")
-
-	app.RequireStop()
-
-	assert.Equal(t, []string{"[order=10 order=15 order=20]"}, rec.attrs())
 }
 
 func TestMiddlewareAttributesLandAtTheTopLevel(t *testing.T) {

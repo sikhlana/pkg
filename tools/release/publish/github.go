@@ -2,16 +2,13 @@ package publish
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/google/go-github/v93/github"
-)
 
-// ErrRepository reports a repository name that isn't owner/name.
-var ErrRepository = errors.New("invalid repository")
+	"github.com/sikhlana/pkg/tools/release/repository"
+)
 
 // GitHub implements Releases with the GitHub REST API.
 type GitHub struct {
@@ -20,13 +17,13 @@ type GitHub struct {
 	repo   string
 }
 
-// NewGitHub returns a GitHub for repository, given as owner/name, as in
-// GITHUB_REPOSITORY. It makes no API calls.
-func NewGitHub(client *github.Client, repository string) (GitHub, error) {
-	owner, repo, ok := strings.Cut(repository, "/")
-
-	if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") {
-		return GitHub{}, fmt.Errorf("%w: %q, want owner/name", ErrRepository, repository)
+// NewGitHub returns a GitHub for the repository name, given as owner/name, as in
+// GITHUB_REPOSITORY, failing with repository.ErrInvalid otherwise. It makes no
+// API calls.
+func NewGitHub(client *github.Client, name string) (GitHub, error) {
+	owner, repo, err := repository.Parse(name)
+	if err != nil {
+		return GitHub{}, err
 	}
 
 	return GitHub{client: client, owner: owner, repo: repo}, nil

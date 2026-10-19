@@ -1,0 +1,51 @@
+name: Vulnerabilities
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vulncheck
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  scan:
+    name: Scan every module
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Get the release tool
+        id: tool
+        uses: ./.github/actions/release-tool
+        with:
+          go: "true"
+      # Findings go to the govulncheck issue rather than failing the run; only
+      # a scan that can't run fails it, leaving the issue alone.
+      - name: Scan and update the issue
+        env:
+          RELEASE: ${{ steps.tool.outputs.release }}
+          GOVULNCHECK: ${{ steps.tool.outputs.govulncheck }}
+          GITHUB_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # The issue tracks the default branch, so a run dispatched on another
+        # branch only reports.
+        run: |
+          args=(vulncheck --govulncheck "${GOVULNCHECK}")
+          if [[ "${GITHUB_REF}" != "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            args+=(--dry-run)
+          fi
+          "${RELEASE}" "${args[@]}"

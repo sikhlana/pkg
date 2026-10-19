@@ -73,7 +73,7 @@ What a module's `VERSION` must exceed depends on two facts: whether it exists on
 
 ## Which modules a pull request changes
 
-CI lints and tests only the modules a PR changes, and that's enough because it builds with `GOWORK=off`. Each module sees its siblings' published versions, so a PR can't break an unchanged module in CI. The local `go.work` sweep remains the early warning for siblings that will upgrade later. A change to root config (`.go-version`, `.golangci.yml`, `go.work`) selects every module for lint and test, without requiring bumps.
+CI lints, tests and scans for vulnerabilities only the modules a PR changes, and that's enough because it builds with `GOWORK=off`. Each module sees its siblings' published versions, so a PR can't break an unchanged module in CI. The local `go.work` sweep remains the early warning for siblings that will upgrade later. A change to root config (`.go-version`, `.golangci.yml`, `go.work`) selects every module for lint, test and scan, without requiring bumps. A `.go-version` bump can fix or introduce standard-library advisories, so scanning everything then is the point.
 
 "Changed" means the module's contents changed, judged against both the base layout and the PR's:
 
@@ -86,6 +86,22 @@ Judging by HEAD's layout alone gets two cases wrong:
 
 - **Moving a package into its own nested module** (adding `logger/sub/go.mod`) silently drops a package from `logger`, without marking `logger`.
 - **Deleting a nested module outright** marks its parent for no reason.
+
+## Vulnerabilities: changed modules per PR, everything weekly
+
+Each module CI selects also gets a govulncheck job, and so does `tools/release`, whose scan adds the `tool` pattern: gorelease and govulncheck are built from its `go.mod` and run on pull request content, so their code counts as code CI builds. govulncheck runs in its default call-graph mode, so only a vulnerability the module's code can reach fails the job; one in a dependency function it never calls doesn't. Its version is pinned by a `tool` directive in `tools/release/go.mod`, as gorelease's is, and the release-tool action builds it once for every job that scans, so pull requests and the weekly run can't drift apart. A version in a workflow env var, installed with `go install` in each job, was the first cut; it needed the same value kept in two workflows.
+
+A PR scans only the modules it changes. Scanning every module would let a new advisory against an untouched module block unrelated work until someone fixed it. Advisories also appear without any code change, though, so a module nobody edits can become vulnerable with no PR to notice. The weekly `vulncheck.yaml` covers that: `release vulncheck` scans every library module in `go.work` and every tool under `tools/`, and can be started by hand.
+
+Its findings go to one issue labelled `govulncheck`, not one per advisory: fewer issues, and nothing to match up when closing. Each run replaces the issue's body with its report, which notifies nobody, and comments only when the advisories found in each module changed, which notifies the watchers; an advisory spreading to another module is a new exposure and counts, and so does an advisory getting a fixed version, the moment it becomes something to act on. A still-unfixed advisory doesn't ping anyone every Monday; a new one does. The previous findings, as module:ID pairs, live in a hidden marker in the body, so the comparison needs no other state; when listing them would crowd the body, the marker holds their SHA-256 digest instead, which still tells a change apart but can't say what changed. A body someone edited by hand, with no marker left, is replaced without a comment, since there's no history to compare. A run that finds nothing closes the issue with a comment linking the run.
+
+Each case does first the step whose loss would go unnoticed, so a run that fails halfway repeats a step next time instead of skipping one. A change is commented on before the body (and its marker) is replaced; otherwise a failed comment would leave the new IDs recorded and the change never announced. The issue is closed before the closing comment; otherwise a failed close would repeat the comment every week. A report too long for an issue body (GitHub caps it at 65,536 characters) is cut down to the advisory IDs per module, pointing at the run's step summary for the rest.
+
+The issue tracks the default branch. A run dispatched by hand on another branch scans and reports in its summary but leaves the issue alone; otherwise trying a fix on a branch would close the issue while main is still affected.
+
+The scheduled run succeeds when it finds vulnerabilities and files them. The issue is the alert. A red scheduled run mails only whoever last edited the cron, so failing on findings would add noise without reaching anyone. A scan that can't run (the vulnerability database unreachable, say) does fail the run, and leaves the issue alone, since a partial scan would read as fixed advisories. The summary still shows what the other modules' scans found, marked incomplete, so one flaky module doesn't hide the rest.
+
+The logic is a release tool subcommand rather than shell in the workflow because `workflow_dispatch` only runs workflows already on the default branch: shell couldn't be tried before merge, while the subcommand is unit-tested against a mocked tracker. It shells out to the pinned govulncheck binary rather than importing `golang.org/x/vuln/scan`, so the weekly scan and the pull request scan run the same binary, built from the same pin.
 
 ## Testing the tool in isolation
 

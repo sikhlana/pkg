@@ -263,8 +263,10 @@ context: |
   - Tests that need external services or run long skip under -short.
 
   Tooling:
-  - Toolchains (go, golangci-lint, modernize, mockgen) run directly;
-    this repo doesn't wrap them in Docker.
+  - Toolchains (go, golangci-lint, modernize, mockgen, govulncheck) run
+    directly; this repo doesn't wrap them in Docker. govulncheck's
+    version is pinned by a tool directive in tools/release/go.mod, which
+    CI builds it from.
   - Prefer a lint ban to a written rule. When a rule here reads "use X,
     not Y" and Y is a symbol, .golangci.yml bans Y through a dedicated
     linter where one exists, otherwise forbidigo with a message naming
@@ -290,7 +292,8 @@ context: |
   - Verification, in order. On each touched module: modernize -fix,
     then golangci-lint run --fix (and again without --fix if it changed
     files; the no-fix run is the source of truth), then the full
-    go test ./... . Then go test -short ./... across every module.
+    go test ./... , then govulncheck ./... . Then go test -short ./...
+    across every module.
 
   Module layout:
     mymodule/
@@ -369,7 +372,8 @@ rules:
       change, before verification.
     - A verification task per touched module running the constitution's
       chain (modernize -fix, golangci-lint run --fix, a no-fix lint
-      re-run if files changed, then the full go test ./...).
+      re-run if files changed, the full go test ./..., then
+      govulncheck ./...).
     - Then a task running go test -short ./... across every module. If
       it fails, fix and repeat both verification steps until it
       passes.

@@ -1,5 +1,5 @@
 // Command release runs this repository's release CI: plan and check on pull
-// requests, publish on push to main.
+// requests, publish on push to main, and vulncheck every week.
 package main
 
 import (
@@ -20,12 +20,14 @@ import (
 	"github.com/sikhlana/pkg/tools/release/plan"
 	"github.com/sikhlana/pkg/tools/release/publish"
 	"github.com/sikhlana/pkg/tools/release/report"
+	"github.com/sikhlana/pkg/tools/release/vulncheck"
 	"github.com/sikhlana/pkg/tools/release/workspace"
 )
 
 var (
 	errCheckFailed = errors.New("release check failed")
 	errDirtyTree   = errors.New("the working tree has uncommitted changes to tracked files")
+	errNoToken     = errors.New("GITHUB_TOKEN is empty; set it, or pass --dry-run")
 )
 
 func main() {
@@ -45,13 +47,13 @@ func main() {
 func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "release",
-		Short:         "Plan, check and publish library module releases",
+		Short:         "Plan, check and publish library module releases, and scan for vulnerabilities",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 
 	root.CompletionOptions.DisableDefaultCmd = true
-	root.AddCommand(newPlanCommand(), newCheckCommand(), newPublishCommand())
+	root.AddCommand(newPlanCommand(), newCheckCommand(), newPublishCommand(), newVulncheckCommand())
 
 	return root
 }
@@ -226,6 +228,95 @@ func newPublishCommand() *cobra.Command {
 			return err
 		},
 	}
+}
+
+func newVulncheckCommand() *cobra.Command {
+	var govulncheckPath string
+
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "vulncheck",
+		Short: "Scan every library module and tool, and keep the govulncheck issue in step",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, ws, err := open(cmd.Context())
+			if err != nil {
+				return err
+			}
+
+			// Found before minutes of scanning, not after them.
+			scanner, err := vulncheck.NewGovulncheck(govulncheckPath)
+			if err != nil {
+				return err
+			}
+
+			opts := vulncheck.Options{
+				Workspace: ws,
+				Run:       scanner.Run,
+				RunURL:    vulncheck.RunURL(os.Getenv),
+			}
+
+			if !dryRun {
+				if opts.Tracker, err = newTracker(); err != nil {
+					return err
+				}
+			}
+
+			results, outcome, err := vulncheck.Run(cmd.Context(), opts)
+
+			w := report.New(cmd.OutOrStdout(), os.Getenv)
+
+			switch {
+			case errors.Is(err, vulncheck.ErrIncomplete):
+				w.Summary("> [!WARNING]\n> Some modules couldn't be scanned (see the log), so this report is " +
+					"incomplete and the issue was left alone.\n\n" + vulncheck.Markdown(results))
+			case results != nil:
+				w.Summary(vulncheck.Markdown(results))
+			}
+
+			if err != nil {
+				return err
+			}
+
+			if !dryRun {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "issue: %s %s\n", outcome.Action, issueRef(outcome.Issue))
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&govulncheckPath, "govulncheck", "govulncheck",
+		"the govulncheck binary, by default the one on PATH")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "write the report but leave the issue alone; needs no token")
+
+	return cmd
+}
+
+// newTracker returns the GitHub tracker, failing without a token, so a run
+// missing one stops before scanning rather than after.
+func newTracker() (vulncheck.Tracker, error) {
+	token := os.Getenv("GITHUB_TOKEN")
+
+	if token == "" {
+		return nil, errNoToken
+	}
+
+	client, err := github.NewClient(github.WithAuthToken(token))
+	if err != nil {
+		return nil, fmt.Errorf("creating GitHub client: %w", err)
+	}
+
+	return vulncheck.NewGitHub(client, os.Getenv("GITHUB_REPOSITORY"))
+}
+
+func issueRef(number int) string {
+	if number == 0 {
+		return ""
+	}
+
+	return "#" + strconv.Itoa(number)
 }
 
 func open(ctx context.Context) (git.Repo, workspace.Workspace, error) {

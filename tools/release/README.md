@@ -1,6 +1,6 @@
 # release
 
-The repository's release CI. Pull requests run `plan` and `check`; every push to `main` runs `publish`. It's repo tooling under `tools/`, so it sits outside `go.work`, runs with `GOWORK=off`, has no `VERSION` and is never released. [docs/release.md](../../docs/release.md) explains why it's shaped this way.
+The repository's release CI. Pull requests run `plan` and `check`; every push to `main` runs `publish`; a weekly workflow runs `vulncheck`. It's repo tooling under `tools/`, so it sits outside `go.work`, runs with `GOWORK=off`, has no `VERSION` and is never released. [docs/release.md](../../docs/release.md) explains why it's shaped this way.
 
 ## Commands
 
@@ -35,9 +35,26 @@ For every library module whose tag for `VERSION` has no GitHub release, creates 
 
 Versions that already have a release are left alone, so a re-run changes nothing, and a failed run is repaired by the next push that leaves the module's `VERSION` unchanged. If a later merge bumps it again first, the unreleased version is skipped: Go is fine with the gap, and the next release includes its changes. `publish` warns about each skipped version. It needs `GITHUB_TOKEN`, with `contents: write`, and `GITHUB_REPOSITORY`.
 
+### vulncheck
+
+Runs govulncheck, with `GOWORK=off`, over every library module in `go.work` and every directory directly under `tools/` with a `go.mod` (skipping, as the go command does, names starting with `.` or `_` and `testdata`), scanning each module's packages and the tools its `go.mod` pins. It keeps only the vulnerabilities reachable from that code, which is what govulncheck's text output reports as affecting it. It prints a markdown report, one table per affected module listing each advisory's ID, summary, affected dependency, fixed version and link, and writes it to the job summary in GitHub Actions. The report ends with a hidden `<!-- govulncheck-findings: ... -->` marker listing each module's advisories as `module:ID` pairs, with `+fix` on those that have a fixed version, or a `sha256:` digest of them when the list would crowd the issue body.
+
+It then keeps one open issue labelled `govulncheck` in step with the findings:
+
+| Findings | Open issue | Result |
+|---|---|---|
+| some | none | an issue opens with the report, and the label is created if it's missing |
+| some | one | when the findings differ from its marker, a comment lists what's new, what has a fix now, what lost its fix and what's gone, per module; then its body is replaced with the report. A body without a marker is replaced silently |
+| none | one | the issue closes, then a comment links the run |
+| none | none | nothing |
+
+Finding vulnerabilities doesn't fail the command; the issue is the alert. A scan that fails to run does, before the issue is touched; the job summary still shows what the other modules' scans found, marked incomplete. It needs `GITHUB_TOKEN`, with `issues: write`, and `GITHUB_REPOSITORY`; the closing comment links the run through `GITHUB_SERVER_URL` and `GITHUB_RUN_ID`.
+
+`--govulncheck <path>` names the binary, by default the one on `PATH`. `--dry-run` prints the report and leaves the issue alone, so it needs no token.
+
 ## In CI
 
-The workflows don't `go run` the tool. The local action [.github/actions/release-tool](../../.github/actions/release-tool/action.yaml) restores the tool and its pinned gorelease from the Actions cache, or builds and caches both on a miss. The cache key hashes `.go-version`, the action itself, this module's `go.mod` and `go.sum`, and its non-test Go files, so a hit is always current. On a hit, `plan` and `publish` skip setting up Go entirely; `release-check` still sets it up, without the dependency cache, because gorelease runs the go command. GitHub evicts a cache after 7 days unused.
+The workflows don't `go run` the tool. The local action [.github/actions/release-tool](../../.github/actions/release-tool/action.yaml) restores the tool, and the gorelease and govulncheck its `go.mod` pins with `tool` directives, from the Actions cache, or builds and caches all three on a miss. The cache key hashes `.go-version`, the action itself, this module's `go.mod` and `go.sum`, and its non-test Go files, so a hit is always current. On a hit, `plan` and `publish` skip setting up Go entirely; `release-check` and the weekly scan still set it up, without the dependency cache, because gorelease and govulncheck run the go command. The pull request scan uses the same action for its govulncheck, so every scan runs the one version this module pins. GitHub evicts a cache after 7 days unused.
 
 ## Running check locally
 
@@ -48,6 +65,13 @@ GOWORK=off go run . check --base origin/main
 ```
 
 `check` compares commits, from the merge base to `HEAD`, and gorelease refuses to run on a working tree with uncommitted changes, so commit first. `plan` takes the same `--base` flag.
+
+```bash
+cd tools/release
+GOWORK=off go run . vulncheck --dry-run
+```
+
+scans the working tree as it is, with the govulncheck on `PATH`.
 
 ## Testing
 

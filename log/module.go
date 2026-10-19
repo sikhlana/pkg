@@ -6,21 +6,6 @@ import (
 	"go.uber.org/fx"
 )
 
-// MiddlewareGroup is the fx group tag New collects OrderedMiddleware from. WithMiddleware and ProvideMiddleware
-// register into it.
-const MiddlewareGroup = `group:"log:middleware"`
-
-// builtMiddleware names a ProvideMiddleware constructor's result inside the private module that pairs it with its
-// order. builtParams carries the same tag.
-const builtMiddleware = `name:"log:middleware::built"`
-
-// builtParams is the input of the adapter ProvideMiddleware registers to pair a built Middleware with its order.
-type builtParams struct {
-	fx.In
-
-	Middleware Middleware `name:"log:middleware::built"`
-}
-
 // Module provides the app's *slog.Logger, built by New from whatever wiring the app supplies, and a WriterProvider
 // whose writers log through it.
 var Module = fx.Module("log", fx.Provide(New, NewWriterProvider))
@@ -83,23 +68,4 @@ func AsTextHandler(v any) any {
 // WithTextHandler supplies New's TextHandler.
 func WithTextHandler(provider TextHandlerProvider) fx.Option {
 	return fx.Supply(AsTextHandler(provider))
-}
-
-// WithMiddleware registers m at order in the middleware chain.
-func WithMiddleware(order int, m Middleware) fx.Option {
-	return fx.Supply(fx.Annotate(OrderedMiddleware{Order: order, Middleware: m}, fx.ResultTags(MiddlewareGroup)))
-}
-
-// ProvideMiddleware registers the Middleware that constructor builds from the graph at order in the middleware chain.
-// The constructor can take any parameters fx can supply, and its first result must have the Middleware type.
-func ProvideMiddleware(order int, constructor any) fx.Option {
-	return fx.Module("log",
-		fx.Provide(fx.Private, fx.Annotate(constructor, fx.ResultTags(builtMiddleware))),
-		fx.Provide(fx.Annotate(
-			func(p builtParams) OrderedMiddleware {
-				return OrderedMiddleware{Order: order, Middleware: p.Middleware}
-			},
-			fx.ResultTags(MiddlewareGroup),
-		)),
-	)
 }

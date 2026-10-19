@@ -23,9 +23,9 @@ const (
 // error carries the name.
 var ErrUnknownServer = errors.New("unknown server")
 
-// Module provides the Provider, over the app's *slog.Logger, and checks at startup that every name given to
-// ProvideMiddleware matches a ProvideServer. The check reads names only, so it builds no server or middleware: a
-// server is built only when something injects it, such as ProvideRunner.
+// Module provides the Provider, over the app's *slog.Logger when it has one, and checks at startup that every name
+// given to ProvideMiddleware matches a ProvideServer. The check reads names only, so it builds no server or
+// middleware: a server is built only when something injects it, such as ProvideRunner.
 var Module = fx.Module("httpserver",
 	fx.Provide(NewProvider),
 	fx.Invoke(checkNames),

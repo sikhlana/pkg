@@ -2,7 +2,6 @@ package trace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -12,6 +11,7 @@ import (
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.uber.org/fx"
 
 	"github.com/sikhlana/pkg/telemetry"
 )
@@ -27,10 +27,6 @@ const (
 	// ProtocolGRPC is OTLP over gRPC.
 	ProtocolGRPC = "grpc"
 )
-
-// ErrUnsupportedProtocol reports an OTEL_EXPORTER_OTLP_TRACES_PROTOCOL or OTEL_EXPORTER_OTLP_PROTOCOL naming a
-// protocol the app's exporter doesn't speak.
-var ErrUnsupportedProtocol = errors.New("unsupported otlp protocol")
 
 // ExporterProvider builds the span exporter from the operator's shared Config. A field that's set is passed to the
 // exporter as an option; an empty one is left for the exporter to read from the environment. TLS settings are used
@@ -107,4 +103,16 @@ func checkProtocol(protocols []string) error {
 	}
 
 	return nil
+}
+
+// AsExporter annotates v, an Exporter or a constructor returning one, as the exporter New builds spans' exporter
+// with. Wrap it in fx.Supply or fx.Provide.
+func AsExporter(v any) any {
+	return fx.Annotate(v, fx.ResultTags(`name:"telemetry/trace:exporter::wired"`))
+}
+
+// WithExporter supplies the exporter New builds spans' exporter with, in place of OTLP over HTTP.
+// otlpgrpc.ProvideExporter calls it.
+func WithExporter(exporter Exporter) fx.Option {
+	return fx.Supply(AsExporter(exporter))
 }

@@ -1,7 +1,6 @@
 package trace
 
 import (
-	"errors"
 	"math"
 	"strconv"
 
@@ -33,21 +32,6 @@ const (
 	// SamplerParentBasedTraceIDRatio follows a parent's decision, and samples a fraction of root spans, the ratio in
 	// sampler_arg, by trace id.
 	SamplerParentBasedTraceIDRatio Sampler = "parentbased_traceidratio"
-)
-
-var (
-	// ErrInvalidSampler reports a sampler other than the Sampler constants.
-	ErrInvalidSampler = errors.New("invalid sampler")
-
-	// ErrInvalidSamplerArg reports a sampler_arg that isn't a ratio between 0 and 1.
-	ErrInvalidSamplerArg = errors.New("sampler_arg must be a ratio between 0 and 1")
-
-	// ErrSamplerArgWithoutSampler reports a sampler_arg set without a sampler. The argument is only passed with the
-	// sampler, so alone it would be ignored.
-	ErrSamplerArgWithoutSampler = errors.New("sampler_arg is set without a sampler")
-
-	// ErrSamplerArgUnused reports a sampler_arg beside a sampler that takes none.
-	ErrSamplerArgUnused = errors.New("sampler_arg is only used by traceidratio and parentbased_traceidratio")
 )
 
 // Config is the operator's trace settings. A set Sampler is passed to the SDK with SamplerArg and wins over

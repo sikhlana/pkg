@@ -15,8 +15,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/sdk/resource"
 
 	"github.com/sikhlana/pkg/telemetry"
 )
@@ -215,15 +213,4 @@ func (c *countingHandler) WithAttrs([]slog.Attr) slog.Handler {
 
 func (c *countingHandler) WithGroup(string) slog.Handler {
 	return c
-}
-
-// resourceAttrs returns a resource's attributes as strings, by key.
-func resourceAttrs(res *resource.Resource) map[attribute.Key]string {
-	out := make(map[attribute.Key]string)
-
-	for _, kv := range res.Attributes() {
-		out[kv.Key] = kv.Value.String()
-	}
-
-	return out
 }

@@ -141,3 +141,19 @@ func warnUnused(logger *slog.Logger, shared telemetry.Config, cfg Config) {
 			slog.String("unused", strings.Join(unused, ", ")))
 	}
 }
+
+// AsTracerProvider annotates v, a tracer provider or a constructor returning one of any concrete type, as the provider
+// New returns unchanged in place of building one. The app owns its lifecycle. Wrap it in fx.Supply or fx.Provide.
+func AsTracerProvider(v any) any {
+	return fx.Annotate(
+		v,
+		fx.As(new(oteltrace.TracerProvider)),
+		fx.ResultTags(`name:"telemetry/trace:provider::supplied"`),
+	)
+}
+
+// WithTracerProvider supplies tp as the provider New returns unchanged in place of building one. The app owns its
+// lifecycle.
+func WithTracerProvider(tp oteltrace.TracerProvider) fx.Option {
+	return fx.Supply(AsTracerProvider(tp))
+}

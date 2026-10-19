@@ -1,3 +1,5 @@
+// Package charm renders log's text format through a charm logger, with timestamps and groups written as qualified keys.
+// ProvideTextHandler makes it the text handler of an app that lists log.Module.
 package charm
 
 import (

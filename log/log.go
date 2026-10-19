@@ -1,3 +1,6 @@
+// Package log builds the app's *slog.Logger: JSON or text on standard error or a writer of your choice, a level from
+// debug and quiet switches, pluggable text rendering, and middleware that can enrich, rewrite or drop every record. It
+// also provides an fx event logger and a writer that logs a subprocess's output line by line.
 package log
 
 import (

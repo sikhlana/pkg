@@ -33,16 +33,16 @@ The module is new, so it starts at 0.1.0 with no bump task. No mocked interface 
 
 ## 6. Constitution and docs
 
-- [ ] 6.1 In `openspec/config.yaml`, the two amendments in design decision 10: `ProvideRunner(name)` registering as `<module>:<name>` for named instances, and per-name groups exposed as a function returning the tag.
-- [ ] 6.2 Write `docs/http.md` from the rollup list in design.md.
-- [ ] 6.3 Write `http/httpserver/README.md` in the constitution's order: overview; Configuration; Exported Members; Usage, Standalone (Listen, Serve, Close, and `Chain`) and With fx (servers in `kernel.Options.Shared`, `ProvideRunner` per command, tagged Config fields through `fx.Out`, middleware with and without an order, adapting a `func(http.Handler) http.Handler` such as otelhttp's, recommending a recovery middleware at a low order, and keeping `shutdown_timeout` below the orchestrator's grace period). No backticks in table cells.
-- [ ] 6.4 In the root `README.md`, add the `httpserver` row to the Modules table in alphabetical order.
-- [ ] 6.5 Update the examples in `kernel/README.md` and `kernelrun/README.md` to named servers: `httpserver.ProvideServer` in shared options and `httpserver.ProvideRunner("api")` on the command; drop `DefaultRunnerName` from kernelrun's.
-- [ ] 6.6 Bump `kernel/VERSION` (patch) for its README edit.
-- [ ] 6.7 Bump `kernelrun/VERSION` (patch) for its README edit.
+- [x] 6.1 In `openspec/config.yaml`, the two amendments in design decision 10: `ProvideRunner(name)` registering as `<module>:<name>` for named instances, and per-name groups exposed as a function returning the tag.
+- [x] 6.2 Write `docs/http.md` from the rollup list in design.md.
+- [x] 6.3 Write `http/httpserver/README.md` in the constitution's order: overview; Configuration; Exported Members; Usage, Standalone (Listen, Serve, Close, and `Chain`) and With fx (servers in `kernel.Options.Shared`, `ProvideRunner` per command, tagged Config fields through `fx.Out`, middleware with and without an order, adapting a `func(http.Handler) http.Handler` such as otelhttp's, recommending a recovery middleware at a low order, and keeping `shutdown_timeout` below the orchestrator's grace period). No backticks in table cells.
+- [x] 6.4 In the root `README.md`, add the `httpserver` row to the Modules table in alphabetical order.
+- [x] 6.5 Update the examples in `kernel/README.md` and `kernelrun/README.md` to named servers: `httpserver.ProvideServer` in shared options and `httpserver.ProvideRunner("api")` on the command; drop `DefaultRunnerName` from kernelrun's.
+- [x] 6.6 Bump `kernel/VERSION` (patch) for its README edit.
+- [x] 6.7 Bump `kernelrun/VERSION` (patch) for its README edit.
 
 ## 7. Verification
 
-- [ ] 7.1 In `http/httpserver/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...` plus `go test -race ./...`, then `govulncheck ./...`.
-- [ ] 7.2 In `kernel/` and `kernelrun/`: the same chain, since their README edits are their only changes.
-- [ ] 7.3 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.1–7.3.
+- [x] 7.1 In `http/httpserver/`: `modernize -fix ./...`, then `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), then the full `go test ./...` plus `go test -race ./...`, then `govulncheck ./...`.
+- [x] 7.2 In `kernel/` and `kernelrun/`: the same chain, since their README edits are their only changes.
+- [x] 7.3 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 7.1–7.3.

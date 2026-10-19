@@ -89,7 +89,7 @@ Found while implementing: fx can't annotate a constructor twice, and `kernelrun.
 | serving | ErrAlreadyListening | ErrAlreadyListening | no-op: Serve owns the listener |
 | closed | ErrAlreadyListening | ErrNotListening | no-op |
 
-A mutex guards the state; Server takes pointer receivers. `Addr()` returns the bound address, or nil before Listen. A Server isn't reusable after Close: an app builds a new one.
+Once `Serve` returns, the server moves to closed, so a second `Serve` fails with `ErrNotListening` (found while implementing; the table's serving row covers only a call made while the first is running). A listener failure while serving also closes every remaining connection, since nothing else will. A mutex guards the state; Server takes pointer receivers. `Addr()` returns the bound address, or nil before Listen. A Server isn't reusable after Close: an app builds a new one.
 
 ### 5. Serve and shutdown
 
@@ -110,7 +110,7 @@ type OrderedMiddleware interface {
 }
 ```
 
-`Chain(h, mws...)` sorts by order, ascending, then builds from the inside out, once: each position's `next` is a fixed `http.HandlerFunc` calling the next middleware's `ServeHTTP` with the handler after it. A middleware that isn't an `OrderedMiddleware` counts as 0. `Ordered(order, m)` returns an `OrderedMiddleware` whose order replaces `m`'s own. `MiddlewareFunc` is a function type implementing `Middleware`. `ProvideMiddleware(name, ctor)` annotates `ctor` with `fx.As(new(Middleware))` and `fx.ResultTags(MiddlewareGroup(name))`, so a constructor can return its concrete type; `fx.As` checks at build that it implements `Middleware`.
+`Chain(h, mws...)` sorts by order, ascending, then builds from the inside out, once: each position's `next` is a fixed `http.HandlerFunc` calling the next middleware's `ServeHTTP` with the handler after it. Each position is a small pointer type holding the middleware and its `next` rather than a closure, so `next` has an identity the tests can compare (found while implementing). A middleware that isn't an `OrderedMiddleware` counts as 0. `Ordered(order, m)` returns an `OrderedMiddleware` whose order replaces `m`'s own. `MiddlewareFunc` is a function type implementing `Middleware`. `ProvideMiddleware(name, ctor)` annotates `ctor` with `fx.As(new(Middleware))` and `fx.ResultTags(MiddlewareGroup(name))`, so a constructor can return its concrete type; `fx.As` checks at build that it implements `Middleware`.
 
 Ties don't fail. dig shuffles the group, so equal orders run in an order that can change between starts; the sort is stable, which only matters for `Chain` called by hand. Most middleware doesn't care where it sits, and the ones that do declare an order or are given one with `Ordered`.
 
@@ -165,6 +165,12 @@ Decisions 3 (why the runner owns the lifecycle, and why the Provider must not ap
 - [A shutdown that runs out of time is reported as a crash, so the process exits non-zero after a SIGTERM] → Intended: dropped requests are worth hearing about. The README tells operators to keep `shutdown_timeout` below the orchestrator's grace period, so the drain finishes before a SIGKILL.
 - [`ProvideServer`'s constructor can still build a server through the Provider with the wrong name's Config] → The tag is on the result, not the Config; the README shows tagged Config fields in the app config so each constructor asks for its own.
 - [A config that forgets `port` listens on a random port] → Accepted with separate `host` and `port` (decision 8); the README says to set the port explicitly.
+
+## Open after apply
+
+- tlsconfig's own records (key pair loaded, rotated, refresh failed) don't carry the `server` attribute: the Provider builds the TLS configuration before `ProvideServer` names the server, and the Provider takes no name by design. They carry the file paths instead.
+- `config/configloader` is a test-only requirement, for the load-through-configloader scenarios, so viper appears in the module graph (not the build) of consumers.
+- govulncheck reports GO-2026-5932 (golang.org/x/crypto/openpgp) at module level only, through configvalidator's indirect requirement; no code calls it.
 
 ## Migration Plan
 

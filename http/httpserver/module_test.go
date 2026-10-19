@@ -547,3 +547,31 @@ func TestValidNamesAreAccepted(t *testing.T) {
 		probe(func(context.Context, servers) error { return nil }),
 	))
 }
+
+func TestProvideServerAndMiddlewareForwardAnnotations(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	err := run(t,
+		httpserver.Module,
+		fx.Supply(slog.New(slog.DiscardHandler)),
+		fx.Supply(fx.Annotate(plain(), fx.ResultTags(`name:"api"`))),
+		fx.Supply(fx.Annotate("tagged", fx.ResultTags(`name:"label"`))),
+		httpserver.ProvideServer("api", func(p httpserver.Provider, c httpserver.Config) (*httpserver.Server, error) {
+			return p(c, ok)
+		}, fx.ParamTags("", `name:"api"`)),
+		httpserver.ProvideMiddleware("api", func(label string) step {
+			return step{tr, label}
+		}, fx.ParamTags(`name:"label"`)),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			_, _, err := fetch(ctx, s.API.Addr())
+
+			return err
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"tagged"}, tr.all())
+}

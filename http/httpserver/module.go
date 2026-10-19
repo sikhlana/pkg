@@ -82,12 +82,16 @@ func MiddlewareGroup(name string) string {
 //
 // Providing a server doesn't run it, and nothing is built until something injects it: list ProvideRunner(name) in
 // the commands that serve it. A name provided twice fails startup, and an invalid one with ErrInvalidName.
-func ProvideServer(name string, constructor any) fx.Option {
+//
+// anns are applied to constructor after ProvideServer's own result tag, for its inputs and hooks: fx.ParamTags to
+// take a tagged dependency, fx.From, fx.OnStart, fx.OnStop. One that tags or converts the result fails startup.
+func ProvideServer(name string, constructor any, anns ...fx.Annotation) fx.Option {
 	if err := checkName(name); err != nil {
 		return fx.Error(err)
 	}
 
-	return fx.Module("httpserver",
+	return fx.Module(
+		"httpserver",
 		fx.Decorate(func(p namedProviderParams) Provider {
 			if p.Logger == nil {
 				return NewProvider(ProviderParams{})
@@ -95,7 +99,10 @@ func ProvideServer(name string, constructor any) fx.Option {
 
 			return NewProvider(ProviderParams{Logger: p.Logger.With(slog.String("server", name))})
 		}),
-		fx.Provide(fx.Private, fx.Annotate(constructor, fx.ResultTags(builtServer))),
+		fx.Provide(
+			fx.Private,
+			fx.Annotate(constructor, append([]fx.Annotation{fx.ResultTags(builtServer)}, anns...)...),
+		),
 		fx.Provide(fx.Annotate(
 			func(s *Server, mws []Middleware) (*Server, error) {
 				if s == nil {
@@ -117,14 +124,19 @@ func ProvideServer(name string, constructor any) fx.Option {
 // parameters fx can supply, and returns any type that implements Middleware, optionally followed by an error. It's
 // called only when the server is built. Naming a server no ProvideServer provides fails startup with
 // ErrUnknownServer, and an invalid name with ErrInvalidName. A constructor that returns a nil Middleware, as Chain
-// describes it, leaves its middleware out, for a condition known only when the server is built.
-func ProvideMiddleware(name string, constructor any) fx.Option {
+// describes it, leaves its middleware out, for a condition known only when the server is built. anns are applied to
+// constructor after ProvideMiddleware's own, for its inputs and hooks: fx.ParamTags to take a tagged dependency,
+// fx.From, fx.OnStart, fx.OnStop. One that tags or converts the result fails startup.
+func ProvideMiddleware(name string, constructor any, anns ...fx.Annotation) fx.Option {
 	if err := checkName(name); err != nil {
 		return fx.Error(err)
 	}
 
 	return fx.Options(
-		fx.Provide(fx.Annotate(constructor, fx.As(new(Middleware)), fx.ResultTags(MiddlewareGroup(name)))),
+		fx.Provide(fx.Annotate(
+			constructor,
+			append([]fx.Annotation{fx.As(new(Middleware)), fx.ResultTags(MiddlewareGroup(name))}, anns...)...,
+		)),
 		fx.Supply(fx.Annotate(name, fx.ResultTags(middlewareTargets))),
 	)
 }

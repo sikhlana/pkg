@@ -77,3 +77,13 @@ See design.md's Fixes from the second code review.
 - [x] 9.9 Rewrite kernelrun's README loop-module example.
 - [x] 9.10 Tests: a server named `built`, conditional and typed-nil middleware left out under fx and through `Chain`, invalid and valid names; spec and design.md updated.
 - [x] 9.11 Verification chain on http/httpserver, kernelrun, log and telemetry, then the short sweep.
+
+## 10. Forwarded annotations
+
+Depends on `forward-fx-annotations`, released first: kernelrun v0.3.0's `ProvideRunner` forwards annotations.
+
+- [x] 10.1 `ProvideServer(name, constructor, anns...)` and `ProvideMiddleware(name, constructor, anns...)`, forwarded after their own; godoc and README rows.
+- [x] 10.2 `ProvideRunner` through `kernelrun.ProvideRunner` with `fx.ParamTags("", NameTag(name)+optional)`; `runnerServer` and `runnerParams` removed.
+- [x] 10.3 A test of both helpers forwarding `fx.ParamTags`; spec and design.md updated.
+- [ ] 10.4 In the replayed `add-httpserver` pull request, require kernelrun v0.3.0 in `http/httpserver/go.mod` once it's published.
+- [x] 10.5 Verification chain on http/httpserver, then the short sweep.

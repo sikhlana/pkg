@@ -76,7 +76,7 @@ The chain is applied before anything can see the server, so setting the handler 
 
 `ProvideRunner(name)` registers through `kernelrun.ProvideRunner("httpserver:"+name, ...)`. Its constructor takes `fx.Lifecycle` and the server under `NameTag(name)` as optional; a missing server returns `ErrUnknownServer` naming it, so the check needs no ordering against kernelrun's own. The prefix keeps a server called `migrate` from colliding with another module's runner of that name.
 
-Found while implementing: fx can't annotate a constructor twice, and `kernelrun.ProvideRunner` annotates its own, so `ProvideRunner` can't hand it a constructor with `fx.ParamTags`. It wraps both in an `fx.Module("httpserver")`: a private adapter resolves the optional server under `NameTag(name)` into an unexported `runnerServer`, and the constructor passed to `kernelrun.ProvideRunner` takes that.
+Found while implementing: fx can't annotate a constructor twice, and `kernelrun.ProvideRunner` annotated its own, so `ProvideRunner` couldn't hand it a constructor with `fx.ParamTags`; a private `runnerServer` adapter resolved the name tag first. The `forward-fx-annotations` change, released before this one, makes kernelrun's helper forward annotations, so the constructor now takes `(fx.Lifecycle, *Server)` with `fx.ParamTags` tagging the server with its `NameTag(name)`, marked optional, and the adapter is gone.
 
 **Alternatives:** the Provider appending the hooks when it builds a server (anything that injects a server, to read its address say, would bind a socket nobody serves, leaving clients hanging in the backlog); binding inside `Serve`, as go-modules did (against the constitution: a port conflict surfaces after startup, and a finished start doesn't mean ready).
 
@@ -173,7 +173,6 @@ Decisions 3 (why the runner owns the lifecycle, and why the Provider must not ap
 
 - `config/configloader` is a test-only requirement, for the load-through-configloader scenarios, so viper appears in the module graph (not the build) of consumers.
 - govulncheck reports GO-2026-5932 (golang.org/x/crypto/openpgp) at module level only, through configvalidator's indirect requirement; no code calls it.
-- kernelrun.ProvideRunner annotates its constructor itself, and fx can't annotate a constructor twice, so a named-instance runner can't put its name tag on kernelrun's constructor. httpserver works around it with a private `runnerServer` adapter; every later named-instance module would copy it. A follow-up change could let kernelrun.ProvideRunner take `fx.ParamTags`.
 
 ## Fixes from code review
 

@@ -54,7 +54,7 @@ Building a server SHALL NOT open a socket, and SHALL fail for a nil handler rath
 
 ### Requirement: Servers are named and run only where a command opts in
 
-Under fx, every server SHALL be provided under a name, and a server provided under a name SHALL be injectable by that name. Providing a server SHALL NOT run it. A command SHALL run a named server only when it opts in to that name, and in a command that neither runs nor injects a named server, that server's constructor, its middleware constructors and its TLS files SHALL NOT be touched. A server that is built but not run SHALL NOT bind a socket. A running server's runner SHALL be named `httpserver:<name>`. A constructor that returns no server and no error SHALL fail startup with an error matching the nil-server sentinel that names the server.
+Under fx, every server SHALL be provided under a name, and a server provided under a name SHALL be injectable by that name. Providing a server SHALL NOT run it. A command SHALL run a named server only when it opts in to that name, and in a command that neither runs nor injects a named server, that server's constructor, its middleware constructors and its TLS files SHALL NOT be touched. A server that is built but not run SHALL NOT bind a socket. A running server's runner SHALL be named `httpserver:<name>`. A constructor that returns no server and no error SHALL fail startup with an error matching the nil-server sentinel that names the server. Server and middleware constructors SHALL accept annotations for their inputs and hooks, applied after the helper's own, so they can take dependencies provided under name tags.
 
 #### Scenario: Provided for every command, run by one
 - **WHEN** servers `api` and `admin` are provided in options shared by every command, the `serve` command opts in to both, and the `migrate` command opts in to neither
@@ -75,6 +75,10 @@ Under fx, every server SHALL be provided under a name, and a server provided und
 #### Scenario: A constructor returns no server
 - **WHEN** the constructor for server `api` returns no server and no error, and a command runs `api`
 - **THEN** startup fails with an error matching the nil-server sentinel, naming `api`
+
+#### Scenario: Constructors take tagged dependencies
+- **WHEN** server `api`'s constructor takes its config through an annotation naming the tag it's provided under, and a middleware constructor for `api` takes a string the same way
+- **THEN** the server is built from that config and serves through that middleware
 
 ### Requirement: Binding happens at start
 

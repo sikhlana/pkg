@@ -11,6 +11,13 @@ Facts that shape the approach, to confirm against the toolchain and the librarie
 - **dig doesn't guarantee the order of a value group's members**, so registration order can't decide anything.
 - **go-playground's `hostname_port` tag** may or may not accept an empty host (`:8080`) and port 0. If it rejects either, the address check is a `Validate` step over `net.SplitHostPort` instead.
 
+Confirmed in task 1.3 against Go 1.27.2's `go doc` and pkg.go.dev:
+
+- `ServeTLS` uses `TLSConfig.GetCertificate` when it's set and the file names are empty, and documents that it clones `TLSConfig`. net/http's package doc says the server enables HTTP/2 automatically over HTTPS, and `Protocols` nil means "usually HTTP/1 and HTTP/2". The tests check ALPN from the client's connection state.
+- `Shutdown` returns the context's error when it expires first, and makes `Serve` return `http.ErrServerClosed` at once, so `Serve` has to wait for the draining goroutine rather than return on `ErrServerClosed`.
+- `slog.NewLogLogger` dispatches each `Output` call as one record at the given level.
+- **`hostname_port` differs.** It accepts `:8080` and `0.0.0.0:80` but rejects port 0 (`127.0.0.1:0`, `:0`) and bracketed IPv6 (`[::1]:8080`); pkg.go.dev doesn't document either case, so this was checked through `configvalidator.Validate`. After a first pass with a single `address` checked by `net.SplitHostPort`, the user chose to go back to separate `host` and `port` fields so the check is go-playground tags alone (decision 8).
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -44,7 +51,7 @@ Package `httpserver`, fx.Module name `httpserver`. Tags: `name:"httpserver:serve
 
 ### 2. Exposure: a Provider, with ProvideServer tagging by name
 
-`Provider` is `func(Config, http.Handler) (*Server, error)`, built by `NewProvider(ProviderParams)` over the injected logger. It's the constitution's Provider shape: the same kind of server, built per Config. The error is the TLS build's, and `ErrNilHandler` for a nil handler, since falling back to `http.DefaultServeMux` would serve a global by accident.
+`Provider` is `func(Config, http.Handler) (*Server, error)`, built by `NewProvider(ProviderParams)` over the injected logger. `ProviderParams.Logger` is `optional:"true"` (decided during apply): with no logger in the graph, or a nil one filled in by hand, records are discarded, as kernelrun does. The Provider also validates the Config it's handed, per the constitution's rule for Provider closures, so the error can be a configvalidator violation too. It's the constitution's Provider shape: the same kind of server, built per Config. The error is the TLS build's, and `ErrNilHandler` for a nil handler, since falling back to `http.DefaultServeMux` would serve a global by accident.
 
 `ProvideServer(name, ctor)` takes a constructor of the app's own, which injects the Provider, its Config and its handler and returns `(*Server, error)`. The helper provides the result privately, collects `MiddlewareGroup(name)`, builds the chain around the server's handler, names the server for logging, and provides it under `NameTag(name)`. So `*Server[name]` always means the server with its middleware, and the name is written once.
 
@@ -68,6 +75,8 @@ The chain is applied before anything can see the server, so setting the handler 
 ```
 
 `ProvideRunner(name)` registers through `kernelrun.ProvideRunner("httpserver:"+name, ...)`. Its constructor takes `fx.Lifecycle` and the server under `NameTag(name)` as optional; a missing server returns `ErrUnknownServer` naming it, so the check needs no ordering against kernelrun's own. The prefix keeps a server called `migrate` from colliding with another module's runner of that name.
+
+Found while implementing: fx can't annotate a constructor twice, and `kernelrun.ProvideRunner` annotates its own, so `ProvideRunner` can't hand it a constructor with `fx.ParamTags`. It wraps both in an `fx.Module("httpserver")`: a private adapter resolves the optional server under `NameTag(name)` into an unexported `runnerServer`, and the constructor passed to `kernelrun.ProvideRunner` takes that.
 
 **Alternatives:** the Provider appending the hooks when it builds a server (anything that injects a server, to read its address say, would bind a socket nobody serves, leaving clients hanging in the backlog); binding inside `Serve`, as go-modules did (against the constitution: a port conflict surfaces after startup, and a finished start doesn't mean ready).
 
@@ -121,7 +130,8 @@ So Module has an invoke, but one that never reaches a server. Duplicate `Provide
 
 ```go
 type Config struct {
-	Address           string                 `mapstructure:"address" validate:"required,hostname_port"`
+	Host              string                 `mapstructure:"host" validate:"omitempty,hostname_rfc1123|ip"`
+	Port              int                    `mapstructure:"port" validate:"gte=0,lte=65535"`
 	ReadTimeout       time.Duration          `mapstructure:"read_timeout"`
 	ReadHeaderTimeout time.Duration          `mapstructure:"read_header_timeout"`
 	WriteTimeout      time.Duration          `mapstructure:"write_timeout"`
@@ -131,7 +141,7 @@ type Config struct {
 }
 ```
 
-A single `address` replaces go-modules' host and port: it's what `net.Listen` takes, it's what tlsconfig's examples show, and `Addr()` on the config goes away. The cost is that an operator can't override the port alone. `shutdown_timeout` replaces `stop_timeout`, which would be confused with kernelrun's stop timeout for OnStop hooks. Zero means the `Default*` constant through an unexported resolver for each timeout. `Validate` joins `ErrNegativeTimeout` for each negative timeout, naming its key, with `configvalidator.ValidateField(&c, &c.TLS)`, since a Config with its own `Validate` owns its subtree.
+`host` and `port` stay separate, as in go-modules, so go-playground's tags check them and an operator can override the port alone: `host` takes `omitempty,hostname_rfc1123|ip` (empty listens on every interface; IPv6 is written bare, `::1`), `port` takes `gte=0,lte=65535`. The `port` tag isn't used because it rejects 0, which picks a free port, and tests bind `127.0.0.1:0`. The cost, accepted by the user: a config that forgets the port gets a random one rather than failing. An unexported `address()` joins them with `net.JoinHostPort`; there's no exported `Addr()` on the Config. (The proposal first had a single `address`; task 1.3 found `hostname_port` rejects port 0 and IPv6, and the user preferred tags to a hand-written `net.SplitHostPort` check.) `shutdown_timeout` replaces `stop_timeout`, which would be confused with kernelrun's stop timeout for OnStop hooks. Zero means the `Default*` constant through an unexported resolver for each timeout. `Validate` joins `ErrNegativeTimeout` for each negative timeout, each as a `configvalidator.Error` naming its key, with `configvalidator.ValidateField(&c, &c.TLS)`, since a Config with its own `Validate` owns its subtree.
 
 The `tls.Config` is built in the Provider, so a bad key pair fails the build, which happens in the app's construction phase, before any start hook.
 
@@ -154,7 +164,7 @@ Decisions 3 (why the runner owns the lifecycle, and why the Provider must not ap
 - [A panicking handler is only reported at Debug without a recovery middleware] → README recommends one at a low order.
 - [A shutdown that runs out of time is reported as a crash, so the process exits non-zero after a SIGTERM] → Intended: dropped requests are worth hearing about. The README tells operators to keep `shutdown_timeout` below the orchestrator's grace period, so the drain finishes before a SIGKILL.
 - [`ProvideServer`'s constructor can still build a server through the Provider with the wrong name's Config] → The tag is on the result, not the Config; the README shows tagged Config fields in the app config so each constructor asks for its own.
-- [`hostname_port` may not accept `:8080` or port 0] → Confirmed in task 1.3; a `net.SplitHostPort` check in `Validate` replaces the tag if needed.
+- [A config that forgets `port` listens on a random port] → Accepted with separate `host` and `port` (decision 8); the README says to set the port explicitly.
 
 ## Migration Plan
 

@@ -1,20 +1,20 @@
 ## Purpose
 
-Serves HTTP for an fx app: named servers provided once for every command, bound and served only by the commands that run them, with operator-configured addresses, timeouts and rotating TLS, a per-server middleware chain, and graceful shutdown.
+Serves HTTP for an fx app: named servers provided once for every command, bound and served only by the commands that run them, with operator-configured hosts, ports, timeouts and rotating TLS, a per-server middleware chain, and graceful shutdown.
 
 ## ADDED Requirements
 
 ### Requirement: Config defaults and validation
 
-A server's config SHALL require an address in host:port form, where the host MAY be empty and the port MAY be 0 to pick a free port. Each timeout (read, read header, write, idle and shutdown) SHALL fall back to its default when zero: 5s, 1s, 10s, 60s and 10s. A negative timeout SHALL make the config invalid with an error matching an exported sentinel that names the field. The TLS section SHALL be validated as tlsconfig defines for a server, and its problems SHALL be reported under the config's own key. A config loaded through configloader SHALL be validated at startup.
+A server's config SHALL take a host, a hostname or IP address that MAY be empty to listen on every interface, and a port from 0 to 65535, where 0 picks a free port. A host or port outside those forms SHALL make the config invalid, naming its field. Each timeout (read, read header, write, idle and shutdown) SHALL fall back to its default when zero: 5s, 1s, 10s, 60s and 10s. A negative timeout SHALL make the config invalid with an error matching an exported sentinel that names the field. The TLS section SHALL be validated as tlsconfig defines for a server, and its problems SHALL be reported under the config's own key. A config loaded through configloader SHALL be validated at startup.
 
 #### Scenario: Zero timeouts use the defaults
-- **WHEN** a server is built from a config that sets only an address
+- **WHEN** a server is built from a config that sets only a host
 - **THEN** it serves with a 5s read timeout, a 1s read header timeout, a 10s write timeout, a 60s idle timeout and a 10s shutdown timeout
 
-#### Scenario: A missing address
-- **WHEN** an app loads a server config with no address
-- **THEN** startup fails, naming the address field
+#### Scenario: A malformed host or port
+- **WHEN** an app loads a server config whose host is `localhost:80`, or whose port is `65536`
+- **THEN** startup fails, naming the host or the port field
 
 #### Scenario: A negative timeout
 - **WHEN** a config sets `shutdown_timeout` to `-1s`
@@ -29,7 +29,7 @@ A server's config SHALL require an address in host:port form, where the host MAY
 Building a server SHALL NOT open a socket, and SHALL fail for a nil handler rather than fall back to a default one. Building it SHALL read its TLS files once when TLS is enabled, and a key pair that can't be loaded SHALL fail the build with tlsconfig's error. The server SHALL bind only when told to listen, and SHALL serve only on the listener it bound.
 
 #### Scenario: Built, not listening
-- **WHEN** a server is built for address `127.0.0.1:0` and never told to listen
+- **WHEN** a server is built for host `127.0.0.1` and port 0 and never told to listen
 - **THEN** no socket is open for it
 
 #### Scenario: An unreadable key pair

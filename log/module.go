@@ -12,13 +12,13 @@ const MiddlewareGroup = `group:"log:middleware"`
 
 // builtMiddleware names a ProvideMiddleware constructor's result inside the private module that pairs it with its
 // order. builtParams carries the same tag.
-const builtMiddleware = `name:"log:middleware:built"`
+const builtMiddleware = `name:"log:middleware::built"`
 
 // builtParams is the input of the adapter ProvideMiddleware registers to pair a built Middleware with its order.
 type builtParams struct {
 	fx.In
 
-	Middleware Middleware `name:"log:middleware:built"`
+	Middleware Middleware `name:"log:middleware::built"`
 }
 
 // Module provides the app's *slog.Logger, built by New from whatever wiring the app supplies, and a WriterProvider

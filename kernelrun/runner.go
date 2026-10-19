@@ -11,7 +11,7 @@ const RunnerGroup = `group:"kernelrun:runner"`
 
 // builtRunner names a ProvideRunner constructor's result inside the private module that pairs it with its name.
 // builtParams carries the same tag.
-const builtRunner = `name:"kernelrun:runner:built"`
+const builtRunner = `name:"kernelrun:runner::built"`
 
 // Func is a runner's body. It runs until its work is done or ctx is done, and its return, whatever it returns, stops
 // the app. Returning nil, or ctx's error once ctx is done, is a clean exit; any other error is a crash.
@@ -28,7 +28,7 @@ type Runner struct {
 type builtParams struct {
 	fx.In
 
-	Func Func `name:"kernelrun:runner:built"`
+	Func Func `name:"kernelrun:runner::built"`
 }
 
 // WithRunner registers f as the runner name.

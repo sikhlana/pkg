@@ -334,25 +334,45 @@ context: |
   Module layout:
     mymodule/
     ├── go.mod, VERSION, README.md    required
+    ├── mymodule.go                   the entry point (New, Run, Load)
+    │                                 or the package doc
     ├── config.go                     when the module has a Config
-    ├── <idea>.go                     one per principal idea, with
-    │                                 its ProvideX (server.go)
-    ├── module.go                     Module, AsX/WithX helpers
+    ├── <idea>.go                     one per principal idea, with its
+    │                                 ProvideX/WithX/AsX (server.go)
+    ├── errors.go                     every sentinel error
+    ├── module.go                     Module, helpers of ideas too
+    │                                 small for a file, shared wiring
     ├── runner.go                     when it owns a long-running loop
-    └── *_test.go
+    └── <file>_test.go                tests follow the file they test
     testing/mymoduletest/             optional consumer-facing doubles,
                                       a module of its own
 
   - A package splits into one file per principal idea, named for it
     (server.go, provider.go, options.go, middleware.go), so no file
-    collects unrelated types. An idea's fx helper lives with it:
-    ProvideX, and the tag helper and errors only it needs, go in x.go
-    (ProvideServer and NameTag in server.go, ProvideRunner in
-    runner.go). module.go holds the Module variable, the AsX/WithX
-    pairs, and wiring that spans ideas, such as a check the Module
-    runs and the errors it shares. A Params struct stays beside its
-    constructor. <package>.go exists only when the package has a
-    single idea, or to carry the package doc.
+    collects unrelated types. <package>.go holds the package's entry
+    point (New, Run, Load) or only its doc; a package of one small
+    idea may stay in that one file.
+  - An idea's fx helpers live with it: when x.go exists, its ProvideX,
+    WithX, AsX and tag helper go there too (ProvideServer and NameTag
+    in server.go, AsFormat in format.go, ProvideRunner and WithRunner
+    in runner.go). An idea too small for its own file has its helpers
+    in module.go (log's AsDebug, configloader's AsFilename). module.go
+    otherwise holds the Module variable and wiring that spans ideas,
+    such as a check the Module runs. A Params struct stays beside its
+    constructor.
+  - Every sentinel error (an exported Err* variable) lives in
+    errors.go, so a package's failure modes are listed in one place
+    and an error doesn't move when a second idea starts using it. An
+    error type that is an idea of its own (configvalidator.Error)
+    lives there too. A package that is a single file keeps its
+    sentinels in it.
+  - Tests follow the file they test: x_test.go for x.go, and
+    errors.go's sentinels are tested where they're returned.
+    helpers_test.go and export_test.go hold shared test plumbing, and
+    a test that drives the package through its entry point and checks
+    behaviour spanning several files (an end-to-end run) stays in
+    <package>_test.go. A platform-specific test takes the file's name
+    and the platform suffix (tint_unix_test.go).
   - A nested module lives at <group>/<group><name> (config/configloader,
     http/httpserver), and its package name equals its directory name.
     Outside the filesystem path and the tag, which the go command

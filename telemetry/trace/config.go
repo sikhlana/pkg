@@ -1,6 +1,14 @@
 package trace
 
-import "errors"
+import (
+	"errors"
+	"math"
+	"strconv"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
+	"github.com/sikhlana/pkg/config/configvalidator"
+)
 
 // Sampler names one of OpenTelemetry's samplers, as OTEL_TRACES_SAMPLER does. A named string, so it decodes from
 // config with no hook.
@@ -59,4 +67,58 @@ func (c Config) Validate() error {
 	_, err := c.sampler()
 
 	return err
+}
+
+// sampler returns the SDK sampler the Config names, nil when it names none, or Validate's error. New checks it again,
+// so a Config that skipped validation fails startup rather than sampling nothing.
+func (c Config) sampler() (sdktrace.Sampler, error) {
+	switch c.Sampler {
+	case "":
+		return c.withoutArg(nil, ErrSamplerArgWithoutSampler)
+	case SamplerAlwaysOn:
+		return c.withoutArg(sdktrace.AlwaysSample(), ErrSamplerArgUnused)
+	case SamplerAlwaysOff:
+		return c.withoutArg(sdktrace.NeverSample(), ErrSamplerArgUnused)
+	case SamplerParentBasedAlwaysOn:
+		return c.withoutArg(sdktrace.ParentBased(sdktrace.AlwaysSample()), ErrSamplerArgUnused)
+	case SamplerParentBasedAlwaysOff:
+		return c.withoutArg(sdktrace.ParentBased(sdktrace.NeverSample()), ErrSamplerArgUnused)
+	case SamplerTraceIDRatio, SamplerParentBasedTraceIDRatio:
+		ratio, err := c.ratio()
+		if err != nil {
+			return nil, err
+		}
+
+		if c.Sampler == SamplerTraceIDRatio {
+			return sdktrace.TraceIDRatioBased(ratio), nil
+		}
+
+		return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio)), nil
+	default:
+		return nil, &configvalidator.Error{Key: "sampler", Err: ErrInvalidSampler}
+	}
+}
+
+// withoutArg returns sampler, or err under sampler_arg's key when SamplerArg is set, since the sampler takes none.
+func (c Config) withoutArg(sampler sdktrace.Sampler, err error) (sdktrace.Sampler, error) {
+	if c.SamplerArg != "" {
+		return nil, &configvalidator.Error{Key: "sampler_arg", Err: err}
+	}
+
+	return sampler, nil
+}
+
+// ratio returns SamplerArg as a ratio, 1 when it's empty, or ErrInvalidSamplerArg under sampler_arg's key.
+func (c Config) ratio() (float64, error) {
+	if c.SamplerArg == "" {
+		return 1, nil
+	}
+
+	r, err := strconv.ParseFloat(c.SamplerArg, 64)
+
+	if err != nil || math.IsNaN(r) || r < 0 || r > 1 {
+		return 0, &configvalidator.Error{Key: "sampler_arg", Err: ErrInvalidSamplerArg}
+	}
+
+	return r, nil
 }

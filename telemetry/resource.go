@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.uber.org/fx"
@@ -63,9 +62,4 @@ func NewResource(p ResourceParams) (*resource.Resource, error) {
 	default:
 		return nil, fmt.Errorf("building resource: %w", err)
 	}
-}
-
-// NewPropagator returns the W3C tracecontext and baggage propagator.
-func NewPropagator() propagation.TextMapPropagator {
-	return propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{})
 }

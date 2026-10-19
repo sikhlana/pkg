@@ -3,6 +3,7 @@ package httpserver
 import (
 	"cmp"
 	"net/http"
+	"reflect"
 	"slices"
 )
 
@@ -58,9 +59,11 @@ func Ordered(order int, m Middleware) OrderedMiddleware {
 }
 
 // Chain returns h wrapped in mws, lowest order outermost, with h innermost. Middleware with equal orders keep their
-// relative order in mws. Each middleware's next is built here, once. Chain with no middleware returns h itself.
+// relative order in mws. Each middleware's next is built here, once. A nil Middleware, a nil pointer, func, map,
+// slice or channel behind one, or either wrapped by Ordered, is left out, so a constructor can return nil to leave
+// its middleware out. Chain with no middleware left returns h itself.
 func Chain(h http.Handler, mws ...Middleware) http.Handler {
-	sorted := slices.Clone(mws)
+	sorted := slices.DeleteFunc(slices.Clone(mws), absent)
 
 	slices.SortStableFunc(sorted, func(a, b Middleware) int {
 		return cmp.Compare(orderOf(a), orderOf(b))
@@ -82,6 +85,28 @@ type link struct {
 // ServeHTTP passes the request to the middleware, with the rest of the chain as its next.
 func (l *link) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.middleware.ServeHTTP(w, r, l.next)
+}
+
+// absent reports whether m stands for no middleware: nil, a nil pointer, func, map, slice or channel behind the
+// interface, or one of those wrapped by Ordered. A nil pointer whose methods would have worked is left out too, since
+// returning one almost always means none.
+func absent(m Middleware) bool {
+	if o, ok := m.(ordered); ok {
+		return absent(o.Middleware)
+	}
+
+	if m == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(m)
+
+	switch v.Kind() { //nolint:exhaustive // Only kinds that can be nil are checked; the rest never are.
+	case reflect.Pointer, reflect.Func, reflect.Map, reflect.Slice, reflect.Chan, reflect.Interface:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // orderOf returns m's declared order, or 0 when it declares none.

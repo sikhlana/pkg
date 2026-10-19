@@ -188,3 +188,51 @@ func TestChainBuildsEachNextOnce(t *testing.T) {
 		assert.Same(t, seen[0], next)
 	}
 }
+
+// pointerStep is a step with a pointer receiver, so a nil *pointerStep is a typed nil behind Middleware.
+type pointerStep struct {
+	step
+}
+
+func (s *pointerStep) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	s.step.ServeHTTP(w, r, next)
+}
+
+func TestChainLeavesOutAbsentMiddleware(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]httpserver.Middleware{
+		"nil":                    nil,
+		"nil pointer":            (*pointerStep)(nil),
+		"nil func":               httpserver.MiddlewareFunc(nil),
+		"Ordered nil":            httpserver.Ordered(10, nil),
+		"Ordered nil pointer":    httpserver.Ordered(10, (*pointerStep)(nil)),
+		"Ordered twice nil func": httpserver.Ordered(5, httpserver.Ordered(10, httpserver.MiddlewareFunc(nil))),
+	}
+
+	for name, absent := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := &trail{}
+
+			w := serve(httpserver.Chain(tr.handler(), step{tr, "kept"}, absent, &pointerStep{step{tr, "pointer"}}))
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, []string{"kept", "pointer", "handler"}, tr.all())
+		})
+	}
+}
+
+func TestChainOfOnlyAbsentMiddlewareReturnsTheHandler(t *testing.T) {
+	t.Parallel()
+
+	handler := &pointerHandler{}
+
+	assert.Same(t, handler, httpserver.Chain(handler, nil, (*pointerStep)(nil)))
+}
+
+// pointerHandler is an http.Handler with an identity, for checking Chain returns it unwrapped.
+type pointerHandler struct{}
+
+func (*pointerHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}

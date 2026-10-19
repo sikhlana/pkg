@@ -11,7 +11,7 @@ One Config per server. configloader validates it when it loads it; the Provider 
 | host | string | The hostname or IP address to listen on, IPv6 written bare (::1). Empty listens on every interface. |
 | port | int | The TCP port, from 0 to 65535. 0 picks a free port, which Server.Addr reports once bound, so set it explicitly in production: a forgotten port listens somewhere random rather than failing. |
 | read_timeout | duration | Bounds reading a whole request, body included. Zero means 5s. |
-| read_header_timeout | duration | Bounds reading a request's headers. Zero means 1s. |
+| read_header_timeout | duration | Bounds reading a request's headers. Zero means 1s. With TLS it usually bounds the handshake too; see below. |
 | write_timeout | duration | Bounds writing a response, from the end of the request's headers. Zero means 10s. |
 | idle_timeout | duration | Bounds the wait for a keep-alive connection's next request. Zero means 60s. |
 | shutdown_timeout | duration | Bounds draining in-flight requests once the server is told to stop. Zero means 10s. See the note on shutdown below. |
@@ -21,6 +21,8 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 
 **Timeouts can't be turned off.** Zero means the default, so every server bounds reads and writes. A handler that streams (server-sent events, long polling) or takes large uploads extends its own deadlines per request with `http.ResponseController`'s `SetWriteDeadline` and `SetReadDeadline`, leaving the rest of the server protected from slow clients.
 
+**TLS handshakes share the shortest timeout.** net/http bounds each TLS handshake by the smallest of read_header_timeout, read_timeout and write_timeout, which with the defaults is read_header_timeout's 1s. A handshake that takes longer, from a client on a high-latency link or with client certificates to verify, fails with an i/o timeout that's logged only at Debug. Raise read_header_timeout when clients are far away or connections fail during the handshake.
+
 **Shutdown.** When a server's runner is cancelled it stops accepting connections and waits up to shutdown_timeout for in-flight requests, whose contexts carry the runner context's values but aren't cancelled with it. Connections still active then are closed, and the runner returns an error matching ErrShutdownTimeout, which kernelrun reports as a crash: requests were cut, and the process exits non-zero. Keep shutdown_timeout below your orchestrator's grace period (Kubernetes' terminationGracePeriodSeconds, 30s by default), so the drain finishes before a SIGKILL.
 
 ## Exported Members
@@ -28,9 +30,9 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | Name | Description |
 |------|-------------|
 | Module | Provides the Provider and checks at startup that every ProvideMiddleware names a provided server. Builds no server itself. Takes the app's *slog.Logger when there is one. |
-| ProvideServer | Provides the *Server a constructor builds under a name, wrapped in that name's middleware. The constructor's Provider logs with the name as the server attribute, so the server's, net/http's and tlsconfig's records carry it. Built only when something injects it. A name provided twice fails startup, and a nil *Server fails it with ErrNilServer. |
-| ProvideRunner | Opts a command in to running the named server as the kernelrun runner httpserver:name: binds in OnStart, serves in the runner, releases an unserved listener in OnStop. Fails startup with ErrUnknownServer for an unknown name. |
-| ProvideMiddleware | Adds the middleware a constructor builds to the named server's chain. The constructor returns any type implementing Middleware and runs only when the server is built. Fails startup with ErrUnknownServer for an unknown name. |
+| ProvideServer | Provides the *Server a constructor builds under a name, wrapped in that name's middleware. The constructor's Provider logs with the name as the server attribute, so the server's, net/http's and tlsconfig's records carry it. Built only when something injects it. A name provided twice fails startup, a nil *Server fails it with ErrNilServer, and an invalid name with ErrInvalidName. The constructor returns a server of its own: its handler is wrapped in place. |
+| ProvideRunner | Opts a command in to running the named server as the kernelrun runner httpserver:name: binds in OnStart, serves in the runner, releases an unserved listener in OnStop. Fails startup with ErrUnknownServer for an unknown name and ErrInvalidName for an invalid one. |
+| ProvideMiddleware | Adds the middleware a constructor builds to the named server's chain. The constructor returns any type implementing Middleware and runs only when the server is built. A constructor returning a nil Middleware leaves it out. Fails startup with ErrUnknownServer for an unknown name and ErrInvalidName for an invalid one. |
 | NameTag | Returns the name tag a server is provided under: name:"httpserver:server:NAME". |
 | MiddlewareGroup | Returns the group tag a server collects its middleware from, group:"httpserver:middleware:NAME", for injecting it elsewhere. Add to it with ProvideMiddleware: registering into the group directly skips the unknown-name check. |
 | Provider | Builds a Server from a Config and a handler. Validates the Config, reads the TLS files once to build the TLS configuration, and fails for a nil handler or a key pair that can't be loaded. |
@@ -54,7 +56,7 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | MiddlewareFunc | Adapts a function to a Middleware. |
 | MiddlewareFunc.ServeHTTP | Calls the function. |
 | Ordered | Returns a Middleware at a given order, replacing any order it declares. |
-| Chain | Wraps a handler in middleware, lowest order outermost, keeping the given order for ties. For servers built without fx. |
+| Chain | Wraps a handler in middleware, lowest order outermost, keeping the given order for ties. For servers built without fx. Leaves out a nil Middleware, a nil pointer, func, map, slice or channel behind one, and either wrapped by Ordered. |
 | ErrNegativeTimeout | A negative timeout. Carried under the timeout's key. |
 | ErrNilHandler | Returned by a Provider handed a nil handler, rather than serving http.DefaultServeMux. |
 | ErrNotListening | Server.Serve on a server that hasn't bound, or has been closed. |
@@ -62,6 +64,7 @@ A negative timeout fails validation with ErrNegativeTimeout under its key. Plain
 | ErrAlreadyServing | Server.Serve on a server another call is serving. |
 | ErrShutdownTimeout | Returned by Server.Serve when connections were still active once shutdown_timeout passed, and were closed. Deliberately doesn't match context.DeadlineExceeded, so kernelrun reports it as a crash however the run ended. |
 | ErrNilServer | A ProvideServer constructor returned a nil *Server without an error. Carries the name. |
+| ErrInvalidName | A ProvideServer, ProvideMiddleware or ProvideRunner name that's empty or holds a character other than a letter, a digit, -, _ or the full stop. Carries the name. |
 | ErrUnknownServer | A ProvideMiddleware or ProvideRunner naming no provided server. Carries the name. |
 
 ## Usage
@@ -205,6 +208,20 @@ httpserver.ProvideMiddleware("api", func(m *Metrics) requestCounter {
 	return requestCounter{count: m.Requests}
 })
 ```
+
+A constructor whose middleware depends on a condition known only when the server is built, such as a config flag, returns nil to leave it out. The constructor has to return the `Middleware` interface for that, since fx keeps whatever it's given:
+
+```go
+httpserver.ProvideMiddleware("api", func(c api.Config) httpserver.Middleware {
+	if !c.CORS.Enabled {
+		return nil
+	}
+
+	return newCORS(c.CORS)
+})
+```
+
+A nil pointer, func, map, slice or channel behind the interface is left out the same way, and so is either wrapped by `Ordered`.
 
 Middleware that has to run at a particular place declares `Order() int`; lower runs outer. A recovery middleware belongs outermost: net/http reports a panicking handler only through its error log, which this module logs at Debug, so without one a panic shows up as a dropped connection and a Debug record:
 

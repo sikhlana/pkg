@@ -16,25 +16,37 @@ type runnerServer struct {
 	server *Server
 }
 
+// runnerParams is the input of the constructor ProvideRunner hands kernelrun.
+type runnerParams struct {
+	fx.In
+
+	Lifecycle fx.Lifecycle
+	Server    runnerServer
+}
+
 // ProvideRunner opts the command it's listed in in to running the server name, as the kernelrun runner
 // "httpserver:<name>". The server binds its address while the app starts, so a bind failure fails startup and a
 // started app is accepting connections; it serves until the runner's context ends, then drains; and a listener it
 // bound but never served, because a later start step failed, is released when the app stops. Naming a server no
-// ProvideServer provides fails startup with ErrUnknownServer.
+// ProvideServer provides fails startup with ErrUnknownServer, and an invalid name with ErrInvalidName.
 func ProvideRunner(name string) fx.Option {
+	if err := checkName(name); err != nil {
+		return fx.Error(err)
+	}
+
 	return fx.Module("httpserver",
 		fx.Provide(fx.Private, fx.Annotate(
 			func(s *Server) runnerServer { return runnerServer{server: s} },
 			fx.ParamTags(NameTag(name)+` optional:"true"`),
 		)),
-		kernelrun.ProvideRunner("httpserver:"+name, func(lc fx.Lifecycle, rs runnerServer) (kernelrun.Func, error) {
-			s := rs.server
+		kernelrun.ProvideRunner("httpserver:"+name, func(p runnerParams) (kernelrun.Func, error) {
+			s := p.Server.server
 
 			if s == nil {
 				return nil, fmt.Errorf("%w: %q", ErrUnknownServer, name)
 			}
 
-			lc.Append(fx.Hook{
+			p.Lifecycle.Append(fx.Hook{
 				OnStart: func(ctx context.Context) error {
 					if err := s.Listen(ctx); err != nil {
 						return fmt.Errorf("binding server %q: %w", name, err)

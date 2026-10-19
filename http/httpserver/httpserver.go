@@ -161,34 +161,28 @@ func (s *Server) Serve(ctx context.Context) error {
 	}()
 
 	srv := s.httpServer(ctx)
-	stop := make(chan struct{})
 	drained := make(chan error, 1)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			drained <- s.drain(ctx, srv)
-		case <-stop:
-			drained <- nil
-		}
-	}()
+	stopDrain := context.AfterFunc(ctx, func() { drained <- s.drain(ctx, srv) })
 
 	err := s.serve(srv, l)
 
-	close(stop)
-
-	drainErr := <-drained
-
-	// Shutdown makes Serve return ErrServerClosed at once, so the drain's outcome is the one that counts.
+	// Only the drain's Shutdown makes serve return ErrServerClosed, so the drain's outcome is the one that counts.
 	if errors.Is(err, http.ErrServerClosed) {
-		return drainErr
+		return <-drained
 	}
 
-	// ServeTLS can fail before handing l to Serve, which is what would otherwise close it.
+	// ServeTLS can fail before handing l to Serve, which is what would otherwise close it. Closing srv first also
+	// ends at once a drain that ctx started meanwhile, rather than waiting out the shutdown timeout for it.
 	_ = l.Close()
 	_ = srv.Close()
 
-	return fmt.Errorf("serving: %w", err)
+	var drainErr error
+
+	if !stopDrain() {
+		drainErr = <-drained
+	}
+
+	return fmt.Errorf("serving: %w", errors.Join(err, drainErr))
 }
 
 // Close releases the listener Listen bound when Serve never took it over. It's a no-op before Listen, while Serve

@@ -3,6 +3,7 @@ package httpserver_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -445,4 +446,104 @@ func handshakeRecord(rec *recorder) *record {
 	}
 
 	return nil
+}
+
+func TestAServerNamedBuilt(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"built": plain()}, provide("built", &calls)),
+		httpserver.ProvideRunner("built"),
+		probe(func(context.Context, servers) error { return nil }),
+	)
+
+	require.NoError(t, err, "the name can't collide with the module's private tags")
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestConditionalMiddlewareIsLeftOut(t *testing.T) {
+	t.Parallel()
+
+	tr := &trail{}
+
+	var calls atomic.Int32
+
+	// Each constructor decides from a condition known only at build time, as one reading the app's config would.
+	conditional := func(enabled bool, label string) func() httpserver.Middleware {
+		return func() httpserver.Middleware {
+			if !enabled {
+				return nil
+			}
+
+			return step{tr, label}
+		}
+	}
+
+	err := run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"api": plain()},
+			provide("api", &calls),
+			httpserver.ProvideMiddleware("api", conditional(true, "enabled")),
+			httpserver.ProvideMiddleware("api", conditional(false, "disabled")),
+			httpserver.ProvideMiddleware("api", func() *pointerStep { return nil }),
+		),
+		httpserver.ProvideRunner("api"),
+		probe(func(ctx context.Context, s servers) error {
+			status, _, err := fetch(ctx, s.API.Addr())
+			if err != nil {
+				return err
+			}
+
+			assert.Equal(t, http.StatusOK, status)
+
+			return nil
+		}),
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"enabled"}, tr.all())
+}
+
+func TestInvalidNamesFailStartup(t *testing.T) {
+	t.Parallel()
+
+	helpers := map[string]func(name string) fx.Option{
+		"ProvideServer": func(name string) fx.Option {
+			return httpserver.ProvideServer(name, func() (*httpserver.Server, error) {
+				return nil, errors.New("never built")
+			})
+		},
+		"ProvideMiddleware": func(name string) fx.Option {
+			return httpserver.ProvideMiddleware(name, func() httpserver.Middleware { return nil })
+		},
+		"ProvideRunner": httpserver.ProvideRunner,
+	}
+
+	for helper, option := range helpers {
+		for _, name := range []string{"", `a"b`, "a b", "a:b", "café"} {
+			t.Run(helper+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				err := run(t, shared(slog.New(slog.DiscardHandler), configs{}, option(name)), idle)
+
+				require.ErrorIs(t, err, httpserver.ErrInvalidName)
+				assert.Contains(t, err.Error(), fmt.Sprintf("%q", name))
+			})
+		}
+	}
+}
+
+func TestValidNamesAreAccepted(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+
+	require.NoError(t, run(t,
+		shared(slog.New(slog.DiscardHandler), configs{"API_v2.internal-1": plain()},
+			provide("API_v2.internal-1", &calls),
+		),
+		httpserver.ProvideRunner("API_v2.internal-1"),
+		probe(func(context.Context, servers) error { return nil }),
+	))
 }

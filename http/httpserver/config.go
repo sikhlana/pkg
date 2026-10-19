@@ -42,7 +42,9 @@ type Config struct {
 	// ReadTimeout bounds reading a whole request, body included. Zero means DefaultReadTimeout.
 	ReadTimeout time.Duration `mapstructure:"read_timeout"`
 
-	// ReadHeaderTimeout bounds reading a request's headers. Zero means DefaultReadHeaderTimeout.
+	// ReadHeaderTimeout bounds reading a request's headers. Zero means DefaultReadHeaderTimeout. With TLS, net/http
+	// also bounds each handshake by the smallest of ReadHeaderTimeout, ReadTimeout and WriteTimeout, which with the
+	// defaults is this one.
 	ReadHeaderTimeout time.Duration `mapstructure:"read_header_timeout"`
 
 	// WriteTimeout bounds writing a response, from the end of the request's headers. Zero means DefaultWriteTimeout.

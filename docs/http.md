@@ -1,6 +1,6 @@
 # HTTP servers
 
-[http/httpserver/README.md](../http/httpserver/README.md) says how to declare, run and wrap a server. This page says why the module is shaped that way. The full discussion, including the alternatives rejected and both code reviews, is in the archived [add-httpserver](../openspec/changes/archive/2026-10-20-add-httpserver/design.md) change.
+[http/httpserver/README.md](../http/httpserver/README.md) says how to declare, run and wrap a server. This page says why the module is shaped that way. The full discussion, including the alternatives rejected and the code reviews, is in the archived [add-httpserver](../openspec/changes/archive/2026-10-20-add-httpserver/design.md) and [httpserver-spec-constructor](../openspec/changes/archive/2026-10-20-httpserver-spec-constructor/design.md) changes.
 
 ## The runner owns the lifecycle
 
@@ -54,7 +54,9 @@ Calling the Provider itself is what lets the module pass the name without replac
 
 The middleware wraps the handler before the build, so a server is never modified after it's built, and a decoration that wraps the handler wraps the whole chain. Its wrap runs outside the middleware, recovery and auth included, which suits something that applies to every server, such as metrics. Middleware that has to run inside recovery or auth is a middleware with an order, not a decoration.
 
-Building the TLS configuration in `Listen` instead, so the name could be set after the build, was considered and rejected: it would move a bad key pair's failure from build to start, and a decoration still couldn't influence a build it didn't make.
+Building the TLS configuration in `Listen` instead, so the name could be set after the build, was considered and rejected: it would move a bad key pair's failure from build to start, and a decoration still couldn't influence a build it didn't make. So was go-modules' shape, a constructor returning a `Config` and an `http.Handler` in either order and found by reflection: a struct says the same thing with types, and fails at compile time rather than with a panic at startup.
+
+The module checks the `Spec`'s handler before building, with the same reflection check `Chain` uses for middleware, so a nil `*Handler` or nil `HandlerFunc` behind the interface fails startup with `ErrNilHandler` rather than starting a server that panics on every request and logs it only at Debug. The check runs before the Provider, so a decoration can't hide a missing handler, and every failure to build is wrapped with the server's name.
 
 ## Timeouts and the TLS handshake
 

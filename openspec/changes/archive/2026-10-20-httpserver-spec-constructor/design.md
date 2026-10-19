@@ -107,7 +107,6 @@ A high-effort review of the branch found these; each fix has a test that fails w
 ## Open after apply
 
 - One server can't be built differently from the others (its own logger, say): the constructor no longer touches the Provider. A `Spec.Options []Option` field, appended after `WithName`, would allow it; left until someone needs it.
-- configvalidator and telemetry have no package doc; the rule's `<package>.go` would carry one when written.
 
 ## Risks / Trade-offs
 
@@ -118,3 +117,14 @@ A high-effort review of the branch found these; each fix has a test that fails w
 ## Migration Plan
 
 One pull request; merging publishes `http/httpserver/v0.2.0`. A consumer's constructor changes from calling `p(cfg, h)` to returning `httpserver.Spec{Config: cfg, Handler: h}`, and drops the Provider from its inputs.
+
+## What happened
+
+- **Shipped in #30**, one pull request despite its size (143 files): http/httpserver 0.2.0, with patch releases of cli 0.3.1, config/configloader 0.1.4, config/configvalidator 0.1.3, kernel 0.3.2, kernelrun 0.3.1, log 0.1.2, telemetry 0.1.2 and tls/tlsconfig 0.1.1. Splitting the repo-wide refactor into its own pull request was offered and declined.
+- **Scope grew during apply and review.** The proposal covered httpserver only. Decisions 5 and 6 (one file per idea, then reworded and applied to every module and tools/release) and package docs for the 13 packages that had none were added on the branch; the proposal's Impact records the module splits.
+- **The rule was worded three times.** First: helpers with their idea, shared errors in `module.go`. Then: `<package>.go` holds the entry point or doc, `x.go` takes its idea's `ProvideX`/`WithX`/`AsX` when it exists, every sentinel goes in `errors.go`, tests sit beside their file. Last: error types that only report failures join the sentinels (kernelrun's `panicError` moved), while a type that is the subject of its own file stays (cli's `ExitError`).
+- **The repo-wide split was done by four parallel agents,** each confined to its own modules and forbidden to commit; each module's diff was then checked as a pure move before its commit. tlsconfig's Validate tests were the one non-move, split out of shared subtests with every assertion kept.
+- **Fixes made in review** are in Fixes from code review above.
+- **Rolled into docs:** decisions 1–3 into `docs/http.md` ("The module builds every server itself", with the rejected alternatives and the handler check); decisions 5 and 6 into a new `docs/layout.md`.
+- **The archive was missed before merge** and done in a follow-up pull request.
+- **Follow-ups left open:** a `Spec.Options` field for building one server differently (see Open after apply); the parked repo-wide smell review, recorded outside the repo.

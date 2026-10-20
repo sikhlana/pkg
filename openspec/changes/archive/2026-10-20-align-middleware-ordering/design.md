@@ -127,3 +127,17 @@ log.ProvideMiddleware(func(...) log.Middleware { return log.Ordered(900, newReda
 ```
 
 A constructor whose middleware declares its own order needs no wrapping. Rollback is pinning the previous versions.
+
+## What happened
+
+- **Shipped as designed**, in one pull request: log 0.2.0 and telemetry 0.2.0, both `feat!`, released in one tier since neither imports the other. No decision changed during apply.
+- **Fixes made in review.** A code review raised six candidates, none a correctness bug in what the specs cover:
+  - `nilableKinds`' comment still claimed every nilable kind after `reflect.Interface` was dropped; it now says what the list holds.
+  - `WithMiddleware` and `WithDestination` panic, through `fx.Supply`, on a value that also implements `error`. A fix providing through a constructor was made and reverted: no realistic middleware or writer is an error, and the constitution has every `WithX` wrap `fx.Supply`. A sweep found every other `WithX` already does.
+  - Dropped as by design or ordinary Go: calling `Handle` on `Ordered(n, nil)` directly panics (as in httpserver; the nil rule covers the chain); an `Order()` with a pointer receiver is missed on a value; a nil inside the app's own wrapper type isn't left out (the spec promises it only for `Ordered`).
+  - Telemetry's move from 100 to 500 changes behaviour for an app that placed middleware between the two. Intended; it goes in the pull request as a migration note.
+- **Rolled into docs:** the generic module's rejection into `docs/middleware.md` ("One rule, not one module"). The slog-context swap went into `docs/log.md` rather than `docs/middleware.md`, as decision 8 planned, since it concerns log alone.
+- **Follow-ups left open:**
+  - httpserver's `isNil` still lists `reflect.Interface`, unreachable there too; tidy it when httpserver is next touched.
+  - No test checks that `telemetry.LogMiddleware` satisfies `log.Middleware` (decision 7); revisit if a signature drift ever slips through.
+

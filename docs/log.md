@@ -21,6 +21,8 @@ A middleware's `Handle(ctx, r, next)` gets each enabled record and calls `next` 
 
 Middleware runs in the order it declares, overridable by the app with `Ordered`, and a nil middleware is left out; [middleware.md](middleware.md) says why, for log and httpserver alike. What's specific to log is the bands: samplers around 100, so a dropped record costs nothing further; attribute injectors around 500; redactors around 900, so they see what the others added. A module can't see another's numbers without importing it, so the bands, written in log's README, are what keep independently written middleware apart. `telemetry.LogMiddleware` declares 500 for that reason.
 
+Replacing middleware with [slog-context](https://github.com/veqryn/slog-context) was considered too. Its `Prepend(ctx, attrs...)` and one extractor would collapse the common pair, something that stores a value in the context and a middleware that copies it onto the record, into a single call. It was kept out: its extractors can only add attributes, so dropping and rewriting would need a second mechanism again, its handler folds `With` and `WithGroup` exactly as log's core handler already does, and it's a pre-v1 dependency for what log's middleware already covers.
+
 ## Middleware sees the whole record
 
 The core handler holds every attribute given to `With` and every group opened with `WithGroup`, and folds them into each record before the chain runs. Nothing reaches the base handler through `WithAttrs` or `WithGroup`. That buys three things:

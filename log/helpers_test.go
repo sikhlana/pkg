@@ -167,7 +167,7 @@ func addRequestID(ctx context.Context, r slog.Record, next func(context.Context,
 }
 
 // adding returns a middleware that adds attrs to every record.
-func adding(attrs ...slog.Attr) log.Middleware {
+func adding(attrs ...slog.Attr) log.MiddlewareFunc {
 	return func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
 		r.AddAttrs(attrs...)
 
@@ -176,12 +176,32 @@ func adding(attrs ...slog.Attr) log.Middleware {
 }
 
 // counting returns a middleware that counts the records it sees and passes them on.
-func counting(n *int) log.Middleware {
+func counting(n *int) log.MiddlewareFunc {
 	return func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
 		*n++
 
 		return next(ctx, r)
 	}
+}
+
+// tracing returns a middleware that appends name to seen and passes the record on.
+func tracing(seen *[]string, name string) log.MiddlewareFunc {
+	return func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error {
+		*seen = append(*seen, name)
+
+		return next(ctx, r)
+	}
+}
+
+// declared is a middleware that declares its order.
+type declared struct {
+	log.MiddlewareFunc
+
+	order int
+}
+
+func (d declared) Order() int {
+	return d.order
 }
 
 func withRequestID(t *testing.T, id string) context.Context {

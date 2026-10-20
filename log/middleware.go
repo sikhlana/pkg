@@ -12,20 +12,58 @@ import (
 // Middleware runs on every enabled record, with the context it was logged with. It passes the record on by calling
 // next, changed or not, and drops it by returning without calling next. Attributes it adds land at the top level of
 // the record, even when the caller opened a group, and a group it adds merges with any top-level group of the same
-// key.
+// key. next is the rest of the chain after this middleware, built once in New, so it's the same for every record and
+// safe for concurrent use.
 //
 // The record shares its attribute storage with the caller's copy. A middleware that keeps it, or passes it to next
 // more than once, clones it first with slog.Record.Clone.
 //
-// The signature uses only standard-library types, so a package can export a matching function without importing log.
-type Middleware func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error
+// The method's signature uses only standard-library types, so a package can implement Middleware without importing
+// log. It clashes with slog.Handler's Handle, so no type is both a handler and a middleware.
+type Middleware interface {
+	Handle(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error
+}
 
-// OrderedMiddleware pairs a Middleware with its place in the chain. Lower orders run first, nearest the caller, and
-// see the record before higher ones do. Middleware with equal orders run in an unspecified order, which can change
-// from one run to the next.
-type OrderedMiddleware struct {
-	Order      int
-	Middleware Middleware
+// OrderedMiddleware is a Middleware that declares where it runs in the chain. Lower orders run first, nearest the
+// caller, and see the record before higher ones do; a Middleware that isn't an OrderedMiddleware counts as order 0.
+// Middleware with equal orders run in an unspecified relative order, which can change from one run to the next.
+type OrderedMiddleware interface {
+	Middleware
+	Order() int
+}
+
+// MiddlewareFunc adapts a function to a Middleware. It declares no order, so it runs at 0 unless wrapped with
+// Ordered.
+type MiddlewareFunc func(ctx context.Context, r slog.Record, next func(context.Context, slog.Record) error) error
+
+// ordered is the OrderedMiddleware Ordered returns.
+type ordered struct {
+	Middleware
+
+	order int
+}
+
+// Handle calls f.
+func (f MiddlewareFunc) Handle(
+	ctx context.Context,
+	r slog.Record,
+	next func(context.Context, slog.Record) error,
+) error {
+	return f(ctx, r, next)
+}
+
+// Order returns the order Ordered was given.
+func (o ordered) Order() int {
+	return o.order
+}
+
+// Ordered returns m at order, replacing any order m declares itself, so an app can place middleware it didn't write.
+func Ordered(order int, m Middleware) OrderedMiddleware {
+	if o, ok := m.(ordered); ok {
+		m = o.Middleware
+	}
+
+	return ordered{Middleware: m, order: order}
 }
 
 // chain returns a function that runs the record through middleware in order, then merges its groups and hands it to
@@ -39,60 +77,62 @@ func chain(middleware []Middleware, base slog.Handler) func(context.Context, slo
 		inner := next
 
 		next = func(ctx context.Context, r slog.Record) error {
-			return m(ctx, r, inner)
+			return m.Handle(ctx, r, inner)
 		}
 	}
 
 	return next
 }
 
-// sortMiddleware returns the middleware ordered by Order, keeping the given order between equal ones.
-func sortMiddleware(middleware []OrderedMiddleware) []Middleware {
-	sorted := slices.SortedStableFunc(slices.Values(middleware), func(a, b OrderedMiddleware) int {
-		return cmp.Compare(a.Order, b.Order)
+// sortMiddleware returns the middleware that isn't absent, lowest order first, keeping the given order between equal
+// ones.
+func sortMiddleware(middleware []Middleware) []Middleware {
+	sorted := slices.DeleteFunc(slices.Clone(middleware), absent)
+
+	slices.SortStableFunc(sorted, func(a, b Middleware) int {
+		return cmp.Compare(orderOf(a), orderOf(b))
 	})
 
-	out := make([]Middleware, 0, len(sorted))
+	return sorted
+}
 
-	for _, m := range sorted {
-		if m.Middleware != nil {
-			out = append(out, m.Middleware)
-		}
+// absent reports whether m stands for no middleware: nil, a nil pointer, func, map, slice or channel behind the
+// interface, or one of those wrapped by Ordered.
+func absent(m Middleware) bool {
+	if o, ok := m.(ordered); ok {
+		return absent(o.Middleware)
 	}
 
-	return out
+	return isNil(m)
 }
 
-// MiddlewareGroup is the fx group tag New collects OrderedMiddleware from. WithMiddleware and ProvideMiddleware
-// register into it.
+// orderOf returns m's declared order, or 0 when it declares none.
+func orderOf(m Middleware) int {
+	if o, ok := m.(OrderedMiddleware); ok {
+		return o.Order()
+	}
+
+	return 0
+}
+
+// MiddlewareGroup is the fx group tag New collects Middleware from. WithMiddleware and ProvideMiddleware register
+// into it.
 const MiddlewareGroup = `group:"log:middleware"`
 
-// builtMiddleware names a ProvideMiddleware constructor's result inside the private module that pairs it with its
-// order. builtParams carries the same tag.
-const builtMiddleware = `name:"log:middleware::built"`
+// WithMiddleware adds m to the middleware chain, at the order it declares. Wrap it with Ordered to place it
+// elsewhere. A nil m supplies nothing.
+func WithMiddleware(m Middleware) fx.Option {
+	if m == nil {
+		return fx.Options()
+	}
 
-// builtParams is the input of the adapter ProvideMiddleware registers to pair a built Middleware with its order.
-type builtParams struct {
-	fx.In
-
-	Middleware Middleware `name:"log:middleware::built"`
+	return fx.Supply(fx.Annotate(m, fx.As(new(Middleware)), fx.ResultTags(MiddlewareGroup)))
 }
 
-// WithMiddleware registers m at order in the middleware chain.
-func WithMiddleware(order int, m Middleware) fx.Option {
-	return fx.Supply(fx.Annotate(OrderedMiddleware{Order: order, Middleware: m}, fx.ResultTags(MiddlewareGroup)))
-}
-
-// ProvideMiddleware registers the Middleware that constructor builds from the graph at order in the middleware chain.
-// The constructor can take any parameters fx can supply, and its first result must have the Middleware type.
-func ProvideMiddleware(order int, constructor any) fx.Option {
-	return fx.Module("log",
-		fx.Provide(fx.Private, fx.Annotate(constructor, fx.ResultTags(builtMiddleware))),
-		fx.Provide(fx.Annotate(
-			func(p builtParams) OrderedMiddleware {
-				return OrderedMiddleware{Order: order, Middleware: p.Middleware}
-			},
-			fx.ResultTags(MiddlewareGroup),
-		)),
-	)
+// ProvideMiddleware adds the middleware constructor builds from the graph to the chain, at the order it declares.
+// constructor can take any parameters fx can supply, and returns any type that implements Middleware, optionally
+// followed by an error. A constructor that returns a nil Middleware, as New describes it, leaves its middleware out,
+// for a condition known only when it runs.
+func ProvideMiddleware(constructor any) fx.Option {
+	return fx.Provide(fx.Annotate(constructor, fx.As(new(Middleware)), fx.ResultTags(MiddlewareGroup)))
 }

@@ -39,9 +39,9 @@ func TestHandlerConformance(t *testing.T) {
 
 	logger, err := log.New(log.Params{
 		Destination: &buf,
-		Middleware: []log.OrderedMiddleware{
-			{Order: 10, Middleware: adding(slog.Bool("middleware", true))},
-			{Order: 20, Middleware: addRequestID},
+		Middleware: []log.Middleware{
+			log.Ordered(10, adding(slog.Bool("middleware", true))),
+			log.Ordered(20, log.MiddlewareFunc(addRequestID)),
 		},
 	})
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestMiddlewareRunsOnADerivedLogger(t *testing.T) {
 	var n int
 
 	logger, rec := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Middleware: counting(&n)}},
+		Middleware: []log.Middleware{counting(&n)},
 	})
 
 	logger.With(slog.String("server", "api")).WithGroup("http").InfoContext(t.Context(), "served")
@@ -78,7 +78,7 @@ func TestMiddlewareRunsOnARecordHandedToTheHandler(t *testing.T) {
 	var n int
 
 	logger, rec := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Middleware: counting(&n)}},
+		Middleware: []log.Middleware{counting(&n)},
 	})
 
 	r := slog.NewRecord(time.Now(), slog.LevelInfo, "handed", 0)
@@ -92,7 +92,7 @@ func TestMiddlewareNeverSeesARecordBelowTheLevel(t *testing.T) {
 	var n int
 
 	logger, _ := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Middleware: counting(&n)}},
+		Middleware: []log.Middleware{counting(&n)},
 	})
 
 	logger.DebugContext(t.Context(), "hidden")
@@ -102,7 +102,7 @@ func TestMiddlewareNeverSeesARecordBelowTheLevel(t *testing.T) {
 
 func TestMiddlewareAttributesLandAtTheTopLevel(t *testing.T) {
 	logger, rec := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Middleware: addRequestID}},
+		Middleware: []log.Middleware{log.MiddlewareFunc(addRequestID)},
 	})
 
 	logger.WithGroup("http").InfoContext(withRequestID(t, "r1"), "served", slog.Int("status", 200))
@@ -123,7 +123,7 @@ func TestAttributesBeforeAndAfterAGroup(t *testing.T) {
 
 func TestMiddlewareSeesAttributesAttachedWithWith(t *testing.T) {
 	logger, rec := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Order: 900, Middleware: redacting}},
+		Middleware: []log.Middleware{log.Ordered(900, log.MiddlewareFunc(redacting))},
 	})
 
 	logger.With(slog.String("token", "secret1")).InfoContext(t.Context(), "attached")
@@ -143,7 +143,7 @@ func TestAttributesKeepTheirOrder(t *testing.T) {
 }
 
 func TestWithAttrsCostsTheSameWhateverTheMiddleware(t *testing.T) {
-	withAttrsAllocs := func(middleware []log.OrderedMiddleware) float64 {
+	withAttrsAllocs := func(middleware []log.Middleware) float64 {
 		logger, err := log.New(log.Params{Destination: io.Discard, Middleware: middleware})
 		require.NoError(t, err)
 
@@ -156,12 +156,12 @@ func TestWithAttrsCostsTheSameWhateverTheMiddleware(t *testing.T) {
 	}
 
 	none := withAttrsAllocs(nil)
-	five := withAttrsAllocs([]log.OrderedMiddleware{
-		{Order: 1, Middleware: addRequestID},
-		{Order: 2, Middleware: addRequestID},
-		{Order: 3, Middleware: addRequestID},
-		{Order: 4, Middleware: addRequestID},
-		{Order: 5, Middleware: addRequestID},
+	five := withAttrsAllocs([]log.Middleware{
+		log.Ordered(1, log.MiddlewareFunc(addRequestID)),
+		log.Ordered(2, log.MiddlewareFunc(addRequestID)),
+		log.Ordered(3, log.MiddlewareFunc(addRequestID)),
+		log.Ordered(4, log.MiddlewareFunc(addRequestID)),
+		log.Ordered(5, log.MiddlewareFunc(addRequestID)),
 	})
 
 	assert.InDelta(t, none, five, 0, "allocations per WithAttrs without middleware and with five")
@@ -170,8 +170,8 @@ func TestWithAttrsCostsTheSameWhateverTheMiddleware(t *testing.T) {
 func TestGroupsWithTheSameKeyMerge(t *testing.T) {
 	t.Run("a middleware's group and the caller's", func(t *testing.T) {
 		logger, rec := newRecorded(t, log.Params{
-			Middleware: []log.OrderedMiddleware{
-				{Middleware: adding(slog.GroupAttrs("http", slog.String("request_id", "r1")))},
+			Middleware: []log.Middleware{
+				adding(slog.GroupAttrs("http", slog.String("request_id", "r1"))),
 			},
 		})
 
@@ -182,8 +182,8 @@ func TestGroupsWithTheSameKeyMerge(t *testing.T) {
 
 	t.Run("nested groups", func(t *testing.T) {
 		logger, rec := newRecorded(t, log.Params{
-			Middleware: []log.OrderedMiddleware{
-				{Middleware: adding(slog.GroupAttrs("network", slog.GroupAttrs("client", slog.String("geo", "GB"))))},
+			Middleware: []log.Middleware{
+				adding(slog.GroupAttrs("network", slog.GroupAttrs("client", slog.String("geo", "GB")))),
 			},
 		})
 
@@ -227,7 +227,7 @@ func TestGroupsWithTheSameKeyMerge(t *testing.T) {
 
 	t.Run("plain duplicates", func(t *testing.T) {
 		logger, rec := newRecorded(t, log.Params{
-			Middleware: []log.OrderedMiddleware{{Middleware: adding(slog.String("request_id", "b"))}},
+			Middleware: []log.Middleware{adding(slog.String("request_id", "b"))},
 		})
 
 		logger.InfoContext(t.Context(), "served", slog.String("request_id", "a"))
@@ -240,8 +240,8 @@ func TestGroupsWithTheSameKeyMerge(t *testing.T) {
 
 		logger, err := log.New(log.Params{
 			Destination: &buf,
-			Middleware: []log.OrderedMiddleware{
-				{Middleware: adding(slog.GroupAttrs("http", slog.String("request_id", "r1")))},
+			Middleware: []log.Middleware{
+				adding(slog.GroupAttrs("http", slog.String("request_id", "r1"))),
 			},
 		})
 		require.NoError(t, err)

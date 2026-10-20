@@ -171,7 +171,7 @@ func TestWriterProviderFromTheModule(t *testing.T) {
 	app := fxtest.New(t,
 		log.Module,
 		log.WithDestination(&buf),
-		log.WithMiddleware(500, addRequestID),
+		log.WithMiddleware(log.MiddlewareFunc(addRequestID)),
 		fx.Populate(&newWriter),
 	)
 	app.RequireStart()
@@ -217,7 +217,7 @@ func TestWriterProviderWithoutAttributes(t *testing.T) {
 
 func TestWriterRecordsCarryItsContext(t *testing.T) {
 	logger, rec := newRecorded(t, log.Params{
-		Middleware: []log.OrderedMiddleware{{Middleware: addRequestID}},
+		Middleware: []log.Middleware{log.MiddlewareFunc(addRequestID)},
 	})
 	w := log.NewWriter(withRequestID(t, "r1"), slog.LevelInfo, logger)
 

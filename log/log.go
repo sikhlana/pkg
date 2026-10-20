@@ -40,8 +40,9 @@ type Params struct {
 	// never called for FormatJSON.
 	TextHandler TextHandlerProvider `name:"log:text_handler" optional:"true"`
 
-	// Middleware runs on every enabled record, lowest Order first. Entries without a Middleware are skipped.
-	Middleware []OrderedMiddleware `group:"log:middleware"`
+	// Middleware runs on every enabled record, lowest order first. A nil Middleware, a nil pointer, func, map, slice
+	// or channel behind one, or either wrapped by Ordered, is left out.
+	Middleware []Middleware `group:"log:middleware"`
 }
 
 // New builds the logger. Neither Debug nor Quiet logs from Info up. JSON records always carry their source location;
@@ -85,18 +86,18 @@ func New(p Params) (*slog.Logger, error) {
 	return slog.New(newHandler(level, base, sortMiddleware(p.Middleware))), nil
 }
 
-// nilableKinds are the kinds whose values can be nil.
+// nilableKinds are the kinds a value behind an interface can have and still be nil.
 var nilableKinds = []reflect.Kind{
-	reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer,
+	reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer,
 }
 
-// isNil reports whether w is nil, or a nil value of a kind that can be, which nothing can be written through.
-func isNil(w io.Writer) bool {
-	if w == nil {
+// isNil reports whether v is nil, or a nil value of a kind that can be behind an interface.
+func isNil(v any) bool {
+	if v == nil {
 		return true
 	}
 
-	v := reflect.ValueOf(w)
+	rv := reflect.ValueOf(v)
 
-	return slices.Contains(nilableKinds, v.Kind()) && v.IsNil()
+	return slices.Contains(nilableKinds, rv.Kind()) && rv.IsNil()
 }

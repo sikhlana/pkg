@@ -24,9 +24,7 @@ Names are also checked for shape: non-empty, letters, digits, `-`, `_` and `.`, 
 
 ## Middleware order comes from the middleware
 
-A server's middleware is a value group per server, and dig doesn't guarantee the order of a group's members: it shuffles them. So registration order can't decide anything, and the order lives on the middleware itself. `OrderedMiddleware` adds `Order() int`, lower runs outer, and anything without it counts as 0. An app that wants to place middleware it didn't write wraps it with `Ordered(n, m)`.
-
-Equal orders don't fail startup. Most middleware doesn't care where it sits, and failing on every tie would force an order onto all of it. A tie-break by type name was rejected too: it would hide the shuffle without making the order meaningful. The middleware that does care declares an order or is given one.
+A server's middleware is a value group per server, so its order lives on the middleware, with `Ordered(n, m)` as the app's override, ties allowed; [middleware.md](middleware.md) says why, and log orders its middleware the same way. Here lower runs outer, so recovery declares a low order to wrap everything else.
 
 ## Why next is a parameter
 
@@ -36,9 +34,9 @@ Ecosystem middleware still adapts through `MiddlewareFunc`, calling the wrapper 
 
 ## Leaving middleware out
 
-A middleware constructor that returns nil leaves its middleware out, and so does one returning a nil pointer, func, map, slice or channel behind the interface, or either wrapped by `Ordered`. `Chain` drops them once, with `reflect`, when it builds the chain.
+A middleware constructor that returns nil leaves its middleware out, as [middleware.md](middleware.md) describes; `Chain` drops it once, when it builds the chain. Conditional middleware is common here (CORS behind a flag, say), and its condition comes from the server's config, known only when the server is built. Without the filter a nil would panic on every request, and net/http logs that only at Debug. Failing startup on a nil was tried first, in add-httpserver, and reversed. A nil pointer whose methods would have worked is dropped too, since returning one almost always means none.
 
-Conditional middleware is common (CORS behind a flag, say), and the condition usually comes from the loaded config, which is only known inside a constructor; whether to list `ProvideMiddleware` at all is decided before the config exists. fx keeps nil values in a group rather than dropping them, so without the filter a nil would panic on every request, logged only at Debug. Failing startup on a nil was tried first and reversed: it made "off" impossible to express without a pass-through middleware, which costs a hop per request and hides the intent. A nil pointer whose methods would have worked is dropped too, since returning one almost always means none.
+That's also why httpserver has no `WithMiddleware` beside `ProvideMiddleware`, as log does: a server's middleware usually depends on config known only when the server is built, so a constructor is the form that fits.
 
 ## Cut requests are a crash, however the run ended
 

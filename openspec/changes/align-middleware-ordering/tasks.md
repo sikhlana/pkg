@@ -29,3 +29,9 @@ No mocked interface changes in either module, so there's no go generate task.
 - [x] 4.1 In `log`: `modernize -fix ./...`, `golangci-lint run --fix ./...` (and again without `--fix` if it changed files), the full `go test ./...`, then `govulncheck ./...`.
 - [x] 4.2 In `telemetry`: the same chain as 4.1.
 - [x] 4.3 Run `go test -short ./...` across every module in `go.work`. If it fails, fix it and repeat 4.1–4.3.
+
+## 5. Code review fixes
+
+- [x] 5.1 Reviewed and rejected: `WithMiddleware` and `WithDestination` keep `fx.Supply` though it panics on a value that also implements `error`. No realistic middleware or writer does, and the constitution has every `WithX` wrap `fx.Supply`.
+- [x] 5.2 `nilableKinds`' comment says what the list now holds, with `reflect.Interface` gone.
+- [x] 5.3 Re-run 4.1 on `log`, then 4.3 across `go.work`.

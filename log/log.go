@@ -86,7 +86,7 @@ func New(p Params) (*slog.Logger, error) {
 	return slog.New(newHandler(level, base, sortMiddleware(p.Middleware))), nil
 }
 
-// nilableKinds are the kinds whose values can be nil.
+// nilableKinds are the kinds a value behind an interface can have and still be nil.
 var nilableKinds = []reflect.Kind{
 	reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer,
 }

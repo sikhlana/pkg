@@ -46,7 +46,7 @@ func TestLogMiddleware(t *testing.T) {
 
 			var got slog.Record
 
-			err := telemetry.LogMiddleware(tt.ctx, r, func(_ context.Context, r slog.Record) error {
+			err := telemetry.LogMiddleware{}.Handle(tt.ctx, r, func(_ context.Context, r slog.Record) error {
 				got = r
 
 				return nil
@@ -62,4 +62,13 @@ func TestLogMiddleware(t *testing.T) {
 			assert.Equal(t, want, attrs(got))
 		})
 	}
+}
+
+func TestLogMiddlewareOrder(t *testing.T) {
+	t.Parallel()
+
+	// A local interface, not log.OrderedMiddleware: importing log here would make telemetry release after it.
+	var m interface{ Order() int } = telemetry.LogMiddleware{}
+
+	assert.Equal(t, 500, m.Order())
 }

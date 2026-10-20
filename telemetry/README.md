@@ -54,8 +54,9 @@ Timeouts, compression, batching and the protocol have no Config fields; set them
 | ErrorSink | The error sink Module installs while the app runs. A signal's constructor takes it, so the signal's stop hooks run before the sink is uninstalled. |
 | ErrorSinkParams | NewErrorSink's inputs: Lifecycle and Logger. |
 | NewErrorSink | Appends a hook that installs Logger as the error sink on start and uninstalls it on stop. |
-| LogMiddleware | A function with log.Middleware's signature that adds trace_id and span_id, as hex, to records logged inside a valid span. |
-| LogMiddlewareOrder | 100, the suggested order for LogMiddleware. |
+| LogMiddleware | A log.Middleware that adds trace_id and span_id, as hex, to records logged inside a valid span. Its zero value is ready to use. |
+| LogMiddleware.Handle | Adds the span context's ids to the record, when there is a valid one, and passes it on. |
+| LogMiddleware.Order | 500, log's band for attribute injectors, so samplers run before it and redactors see its attributes. |
 | AsServiceName | Annotates a string, or a constructor returning one, as service.name. |
 | WithServiceName | Supplies service.name. |
 | AsServiceVersion | Annotates a string, or a constructor returning one, as service.version. |
@@ -122,7 +123,7 @@ tp, err := trace.New(trace.Params{Lifecycle: lc, Logger: logger, Resource: res, 
 
 `lc` is an `fx.Lifecycle` you start and stop yourself, such as `fxtest.NewLifecycle(t)` in a test: starting it builds the exporter, and stopping it flushes and shuts the provider down.
 
-`telemetry.LogMiddleware` works on its own with [log](../log/README.md): pass it to `log.WithMiddleware`, or call it from your own handler.
+`telemetry.LogMiddleware{}` works on its own with [log](../log/README.md): put it in `log.Params.Middleware`, or call its `Handle` from your own handler.
 
 ### With fx
 
@@ -192,10 +193,10 @@ fx.Supply(trace.Config{Sampler: trace.SamplerAlwaysOn}),
 
 #### Trace ids in the logs
 
-Register `LogMiddleware` with the log module. Records logged with a context inside a span gain `trace_id` and `span_id`; this works whether or not anything is exported, as long as the context carries a span context:
+Register `LogMiddleware` with the log module. Records logged with a context inside a span gain `trace_id` and `span_id`; this works whether or not anything is exported, as long as the context carries a span context. It declares order 500, so it needs no order of its own; wrap it in `log.Ordered` to place it elsewhere:
 
 ```go
-log.WithMiddleware(telemetry.LogMiddlewareOrder, telemetry.LogMiddleware)
+log.WithMiddleware(telemetry.LogMiddleware{})
 ```
 
 #### Globals

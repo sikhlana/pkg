@@ -117,6 +117,15 @@ context: |
     server) can't be a constant: it's group:"<module>:<purpose>:<name>",
     exposed as a function returning the tag (MiddlewareGroup(name)),
     beside its ProvideX(name, ...) helper and its collector.
+  - A group whose members run in order (a middleware chain) takes the
+    order from the member, never from registration, since dig shuffles
+    groups: an optional Order() int, 0 when absent, lowest first, with
+    an exported Ordered(n, x) that replaces a member's own order, and
+    unwraps rather than nests when given its own result. Equal orders
+    keep their given order within a slice and are unspecified across
+    the group, without failing startup. A nil member, or a nil pointer,
+    func, map, slice or channel behind one, wrapped by Ordered or not,
+    is left out. docs/middleware.md says why.
   - A helper whose caller's constructor may need a tag built at wiring
     time, because it registers into another module's machinery
     (kernelrun.ProvideRunner) or builds named instances

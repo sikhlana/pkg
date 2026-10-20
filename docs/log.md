@@ -10,18 +10,16 @@ Quiet is a level, Warn and above, not a handler that discards everything. A quie
 
 ## Middleware is a step a record passes through
 
-A middleware gets each enabled record and calls `next` to pass it on, changed or not, or returns without calling it to drop the record. It never implements `slog.Handler`. Two alternatives lost:
+A middleware's `Handle(ctx, r, next)` gets each enabled record and calls `next` to pass it on, changed or not, or returns without calling it to drop the record. It never implements `slog.Handler`. Two alternatives lost:
 
 - **Handler middleware (`func(slog.Handler) slog.Handler`)** has to re-wrap itself in `WithAttrs` and `WithGroup`. One that forgets is skipped by every logger derived with `With`, without any error, and `With` is on every request path.
 - **Attribute extractors (`func(ctx) []slog.Attr`)** can add attributes but can't drop or rewrite a record, so samplers and redactors would need a second mechanism.
 
-The signature uses only standard-library types, so a module can export a middleware without importing `log`, and the app registers it. That keeps to the rule that modules don't import siblings just to integrate.
+`Middleware` is an interface rather than a function type so that a middleware can declare its order with an `Order()` method; `MiddlewareFunc` adapts a function. The method is named `Handle`, after `slog.Handler`'s, so the two clash and no type can be both, as httpserver's `ServeHTTP(w, r, next)` clashes with `http.Handler`'s. Its signature uses only standard-library types, so a module can implement it without importing `log`, and the app registers it. That keeps to the rule that modules don't import siblings just to integrate.
 
-## The app orders the middleware
+## The middleware declares its order
 
-Each middleware gets its order when it's registered, not from a method on itself. Modules can't see each other's numbers, or any constant in `log`, without importing it, so an `Order()` method means picking numbers blind. The app sees the whole composition.
-
-Lower orders run first. Samplers go low, so a dropped record costs nothing further; redactors go high, so they see what the others added. Equal orders run in whatever order fx gives, which changes between runs: dig shuffles value groups on purpose. That's left alone rather than broken by name, so the choice stays with the app, which gives distinct orders where they matter.
+Middleware runs in the order it declares, overridable by the app with `Ordered`, and a nil middleware is left out; [middleware.md](middleware.md) says why, for log and httpserver alike. What's specific to log is the bands: samplers around 100, so a dropped record costs nothing further; attribute injectors around 500; redactors around 900, so they see what the others added. A module can't see another's numbers without importing it, so the bands, written in log's README, are what keep independently written middleware apart. `telemetry.LogMiddleware` declares 500 for that reason.
 
 ## Middleware sees the whole record
 

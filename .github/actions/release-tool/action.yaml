@@ -51,7 +51,7 @@ runs:
 
     - name: Set up Go to build
       if: steps.cache.outputs.cache-hit != 'true' && inputs.setup-go == 'true'
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version-file: .go-version
         cache-dependency-path: tools/release/go.sum
@@ -82,7 +82,7 @@ runs:
     # No dependency cache: the binaries are already built.
     - name: Set up Go to run
       if: steps.cache.outputs.cache-hit == 'true' && inputs.go == 'true' && inputs.setup-go == 'true'
-      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version-file: .go-version
         cache: false
